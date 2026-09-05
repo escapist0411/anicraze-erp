@@ -1,0 +1,8 @@
+-- users table placeholder
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    role_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);

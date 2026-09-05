@@ -1,0 +1,3 @@
+import { ShieldX } from 'lucide-react';
+import { Link } from 'react-router-dom';
+export default function Forbidden(){return <main className="grid min-h-dvh place-items-center bg-muted/30 p-6"><section className="max-w-md rounded-2xl border bg-card p-8 text-center shadow-sm"><ShieldX className="mx-auto size-10 text-destructive"/><h1 className="mt-4 text-2xl font-semibold">Access denied</h1><p className="mt-2 text-sm text-muted-foreground">Your account does not have permission to open this module.</p><Link to="/" className="mt-6 inline-flex rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Return to dashboard</Link></section></main>}

@@ -1,0 +1,7 @@
+export interface DashboardKpis { gross_sales:string; discounts:string; taxable_sales:string; returns:string; net_sales:string; revenue:string; orders:number; gst_collected:string; cost_of_goods_sold:string; gross_profit:string; expenses:string; refunds:string; estimated_net_operating_profit:string; net_profit:string; average_order_value:string }
+export interface InventorySummary { inventory_value:string; available_units:number; low_stock_count:number; out_of_stock_count:number; damaged_units:number; godown_units:number; shop_units:number; in_transit_units:number }
+export interface SalesTrendPoint { date: string; revenue: string; orders: number }
+export interface StorePerformancePoint { store_id:string; store_name:string; net_sales:string; revenue:string; orders:number; average_order_value:string }
+export interface TopProduct { product_id:string; product_name:string; sku:string; quantity:number; net_sales:string; revenue:string; gross_profit:string }
+export interface DashboardAlert { severity: 'SUCCESS'|'WARNING'|'CRITICAL'; code?: string; message: string }
+export interface OwnerDashboard { kpis:DashboardKpis; inventory_summary:InventorySummary; sales_trend:SalesTrendPoint[]; store_performance:StorePerformancePoint[]; top_selling_products:TopProduct[]; payment_summary:{payment_method:string;amount:string;transactions:number;percentage:string}[]; active_employees:number; attendance_percentage:string; alerts:DashboardAlert[]; business_insights:DashboardAlert[]; definitions:Record<string,string> }

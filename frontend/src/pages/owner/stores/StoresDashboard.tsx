@@ -1,0 +1,16 @@
+import { useQuery } from '@tanstack/react-query';
+import { Building2, Plus, Warehouse } from 'lucide-react';
+import { locationServices } from '@/services/domain-services';
+import { getApiErrorMessage } from '@/lib/api-error';
+
+type Location = Record<string, unknown> & { id?: string; name?: string; code?: string; address?: string; is_active?: boolean };
+function LocationList({ items, icon: Icon, empty }: { items: Location[]; icon: typeof Building2; empty: string }) { return items.length ? <div className="grid gap-3 md:grid-cols-2">{items.map((item, index) => <article key={item.id ?? index} className="rounded-lg border bg-background p-4"><Icon className="size-5 text-primary"/><h3 className="mt-3 font-semibold">{item.name ?? item.code ?? 'Unnamed location'}</h3><p className="mt-1 text-sm text-muted-foreground">{item.code ?? item.address ?? 'No address recorded'}</p><span className={`mt-3 inline-block rounded-full px-2 py-1 text-xs font-semibold ${item.is_active === false ? 'bg-muted text-muted-foreground' : 'bg-emerald-500/10 text-emerald-700'}`}>{item.is_active === false ? 'Inactive' : 'Active'}</span></article>)}</div> : <p className="py-10 text-center text-sm text-muted-foreground">{empty}</p>; }
+
+export default function StoresDashboard() {
+  const stores = useQuery({ queryKey: ['stores'], queryFn: () => locationServices.stores.list() });
+  const warehouses = useQuery({ queryKey: ['warehouses'], queryFn: () => locationServices.warehouses.list() });
+  const error = stores.error ?? warehouses.error;
+  return <div className="mx-auto max-w-[1400px] space-y-6"><header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm text-muted-foreground">Multi-location operations</p><h2 className="mt-1 text-3xl font-semibold">Stores & warehouses</h2><p className="mt-2 text-sm text-muted-foreground">Live authorized locations from the ERP.</p></div><button type="button" disabled title="Location creation is not available in this deployment." className="inline-flex h-11 cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground opacity-50"><Plus className="size-4"/>Add store</button></header>
+    {error ? <div role="alert" className="rounded-xl border border-destructive/20 p-5 text-destructive">{getApiErrorMessage(error)} <button type="button" onClick={() => { stores.refetch(); warehouses.refetch(); }} className="ml-2 underline">Retry</button></div> : <><section className="rounded-xl border bg-card p-5"><h3 className="mb-4 flex items-center gap-2 font-semibold"><Building2 className="size-5"/>Stores ({stores.data?.length ?? 0})</h3>{stores.isPending ? <div className="h-32 animate-pulse rounded-lg bg-muted"/> : <LocationList items={(stores.data ?? []) as Location[]} icon={Building2} empty="No stores are configured."/>}</section><section className="rounded-xl border bg-card p-5"><h3 className="mb-4 flex items-center gap-2 font-semibold"><Warehouse className="size-5"/>Warehouses ({warehouses.data?.length ?? 0})</h3>{warehouses.isPending ? <div className="h-32 animate-pulse rounded-lg bg-muted"/> : <LocationList items={(warehouses.data ?? []) as Location[]} icon={Warehouse} empty="No warehouses are configured."/>}</section></>}
+  </div>;
+}

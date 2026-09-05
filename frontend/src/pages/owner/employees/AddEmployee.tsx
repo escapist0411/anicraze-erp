@@ -1,0 +1,2 @@
+import { EmployeeForm } from '@/components/employees/EmployeeOperations';
+export default function AddEmployee() { return <div className="mx-auto max-w-4xl space-y-6"><section><p className="text-sm text-muted-foreground">Employee directory / Add employee</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Add new employee</h2><p className="mt-2 text-sm text-muted-foreground">Capture personal, contact, employment, store, and salary details.</p></section><EmployeeForm /></div>; }

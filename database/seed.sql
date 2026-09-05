@@ -1,0 +1,2 @@
+-- Placeholder seed data for Anicraze ERP
+-- Add initial records here.

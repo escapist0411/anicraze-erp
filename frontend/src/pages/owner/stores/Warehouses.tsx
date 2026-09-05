@@ -1,0 +1,2 @@
+import { WarehouseCard, WarehouseMap, WarehouseProfile } from '@/components/warehouses/WarehouseComponents';
+export default function Warehouses() { return <div className="mx-auto max-w-[1500px] space-y-6"><section><p className="text-sm text-muted-foreground">Storage network</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Warehouses</h2></section><WarehouseCard /><WarehouseProfile /><WarehouseMap /></div>; }

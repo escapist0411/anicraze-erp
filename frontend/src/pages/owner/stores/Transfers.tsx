@@ -1,0 +1,2 @@
+import { TransferForm, TransferTable, TransferTimeline } from '@/components/transfers/TransferComponents';
+export default function Transfers() { return <div className="mx-auto max-w-[1500px] space-y-6"><section><p className="text-sm text-muted-foreground">Inter-location logistics</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Stock transfers</h2></section><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]"><TransferTable /><TransferForm /></div><TransferTimeline /></div>; }

@@ -1,0 +1,2 @@
+-- Placeholder database schema for Anicraze ERP
+-- Add tables and relationships here.

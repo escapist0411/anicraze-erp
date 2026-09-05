@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: anicraze-demo-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: APP_ENV
+        value: demo
+      - key: DEBUG
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: REDIS_ENABLED
+        value: "false"
+      - key: WHATSAPP_ENABLED
+        value: "false"
+      - key: WHATSAPP_PROVIDER
+        value: development
+      - key: MAIL_ENABLED
+        value: "false"
+      - key: MULTI_WAREHOUSE_ENABLED
+        value: "false"
+      - key: DATABASE_POOL_SIZE
+        value: "3"
+      - key: DATABASE_MAX_OVERFLOW
+        value: "2"
+      - key: DEMO_OWNER_PASSWORD
+        sync: false
+      - key: DEMO_EMPLOYEE_PASSWORD
+        sync: false
+      - key: DEMO_MANAGER_PASSWORD
+        sync: false

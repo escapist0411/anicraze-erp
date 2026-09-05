@@ -1,0 +1,6 @@
+import { api, downloadFile, getData } from './api';
+import type { QueryParams } from '@/types/api';
+import type { ExportFormat, ReportFilters } from '@/types/reports';
+export interface ReportSchedule{id:string;name:string;report_type:string;format:ExportFormat;frequency:string;timezone:string;recipient_emails_json:string[];is_active:boolean;last_run_at?:string;next_run_at?:string}
+export interface ScheduleRunResult{report:{status:string;filename?:string;download_url?:string;reason?:string};email:{status:string;attempts:unknown[]}}
+export const reportsService={get:(domain:string,report:string,params:QueryParams={})=>getData<Record<string,unknown>>(`/reports/${domain}/${report}`,params),weekly:(params:QueryParams={})=>getData<Record<string,unknown>>('/reports/weekly-business-summary',params),export:(reportType:string,format:ExportFormat,filters:ReportFilters={})=>downloadFile('/reports/export',{report_type:reportType,format,...filters}),schedules:()=>getData<ReportSchedule[]>('/report-schedules'),createSchedule:async(payload:unknown)=>(await api.post('/report-schedules',payload)).data.data,runSchedule:async(id:string)=>(await api.post(`/report-schedules/${id}/run-now`)).data.data as ScheduleRunResult,targets:()=>getData<unknown[]>('/reports/targets')};

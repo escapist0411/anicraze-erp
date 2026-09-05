@@ -1,0 +1,1 @@
+export function AppFooter() { return <footer className="border-t px-6 py-4 text-xs text-muted-foreground">© {new Date().getFullYear()} Anicraze ERP <span className="mx-2">·</span> Enterprise operations, simplified.</footer>; }

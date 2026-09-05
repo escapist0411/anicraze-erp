@@ -1,0 +1,52 @@
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node and builds
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# IDE and operating system
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and coverage
+*.log
+logs/
+coverage/
+htmlcov/
+.coverage
+
+# Local databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+
+# Secrets and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+
+# Runtime-generated files
+uploads/
+generated/
+temp/

@@ -1,0 +1,2 @@
+import { LeaveCard, AttendanceCalendar } from '@/components/employees/HRPanels';
+export default function Leave() { return <div className="mx-auto max-w-[1200px] space-y-6"><section><p className="text-sm text-muted-foreground">Time off operations</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Leave management</h2></section><div className="grid gap-6 xl:grid-cols-2"><LeaveCard /><AttendanceCalendar /></div></div>; }

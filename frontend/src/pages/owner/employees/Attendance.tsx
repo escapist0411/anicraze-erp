@@ -1,0 +1,3 @@
+import { AttendanceCalendar, AttendanceChart } from '@/components/employees/HRPanels';
+import { ShiftScheduler } from '@/components/employees/EmployeeOperations';
+export default function Attendance() { return <div className="mx-auto max-w-[1400px] space-y-6"><section><p className="text-sm text-muted-foreground">Workforce operations</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Attendance management</h2><p className="mt-2 text-sm text-muted-foreground">Present, absent, late, working hour, and overtime visibility.</p></section><div className="grid gap-6 xl:grid-cols-2"><AttendanceChart /><AttendanceCalendar /></div><ShiftScheduler /></div>; }

@@ -1,0 +1,2 @@
+import { StockAdjustmentTable, AlertCard } from '@/components/transfers/TransferComponents';
+export default function StockAdjustments() { return <div className="mx-auto max-w-[1500px] space-y-6"><section><p className="text-sm text-muted-foreground">Inventory controls</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Stock adjustments</h2></section><StockAdjustmentTable /><AlertCard /></div>; }

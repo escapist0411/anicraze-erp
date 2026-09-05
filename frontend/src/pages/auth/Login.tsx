@@ -1,0 +1,3 @@
+import { motion } from 'framer-motion';
+import { LoginForm } from '@/components/auth/LoginForm';
+export default function Login() { return <motion.section initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .35 }}><div className="mb-8"><p className="text-sm font-medium text-primary">WELCOME BACK</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">Sign in to your workspace</h1><p className="mt-3 text-sm leading-6 text-muted-foreground">Use your organizational account to continue to Anicraze ERP.</p></div><LoginForm /><p className="mt-8 text-center text-xs text-muted-foreground">Protected by enterprise-grade security and session controls.</p></motion.section>; }

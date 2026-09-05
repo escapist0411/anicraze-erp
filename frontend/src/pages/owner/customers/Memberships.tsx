@@ -1,0 +1,2 @@
+import { MembershipCard, CustomerInsights } from '@/components/customers/CustomerPanels';
+export default function Memberships() { return <div className="mx-auto max-w-[1600px] space-y-6"><section><p className="text-sm text-muted-foreground">Retention and benefits</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Membership tiers</h2></section><MembershipCard /><CustomerInsights /></div>; }
