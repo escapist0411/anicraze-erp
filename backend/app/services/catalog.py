@@ -10,6 +10,7 @@ from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.paths import UPLOAD_DIR
 from app.exceptions.domain import ConflictError, NotFoundError
 from app.models.auth import AuditLog, User
 from app.models.catalog import Anime, Brand, CatalogStatus, Category, Character, Product, ProductImage, ProductStatus, ProductVariant
@@ -18,7 +19,7 @@ from app.repositories.management import ManagementRepository
 from app.schemas.catalog import *
 from app.utils.time import utc_now
 
-UPLOAD_ROOT = Path(__file__).resolve().parents[2] / "uploads"
+UPLOAD_ROOT = UPLOAD_DIR
 
 
 def slug_part(value: str) -> str:

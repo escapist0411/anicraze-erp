@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
+from app.config.paths import UPLOAD_DIR, ensure_runtime_directories
 from app.config.settings import get_settings
 from app.exceptions.domain import DomainError
 from app.middleware.request_context import RequestContextMiddleware
@@ -17,6 +18,7 @@ from app.startup.lifecycle import lifespan
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+ensure_runtime_directories()
 app = FastAPI(title=settings.app_name, version="1.1.0", openapi_url=f"{settings.api_v1_prefix}/openapi.json", docs_url=f"{settings.api_v1_prefix}/docs", redoc_url=None, lifespan=lifespan)
 
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allow_headers=["Authorization", "Content-Type", "X-Request-ID"], expose_headers=["X-Request-ID"])
@@ -60,4 +62,4 @@ async def handle_unexpected_error(request: Request, error: Exception) -> JSONRes
 
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
