@@ -5,11 +5,13 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config.settings import get_settings
 from app.database.base import Base
+from app.database.url import normalize_database_url
 from app.models import auth, billing, catalog, crm, hr, inventory, notifications, procurement, reports
 
 config = context.config
 settings = get_settings()
-sync_database_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
+database_config = normalize_database_url(settings.database_url)
+sync_database_url = database_config.migration_url.render_as_string(hide_password=False)
 config.set_main_option("sqlalchemy.url", sync_database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
