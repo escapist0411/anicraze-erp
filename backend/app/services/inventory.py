@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.models.auth import AuditLog, User
@@ -80,6 +81,107 @@ class InventoryService:
         x=await self.get(id,True)
         if x.available_quantity or x.reserved_quantity or x.damaged_quantity: raise ConflictError("Inventory with stock cannot be deleted","INVENTORY_NOT_EMPTY")
         x.deleted_at=utc_now(); x.updated_by_id=self.actor.id; await self.audit("INVENTORY_DELETED","inventory",x.id)
+
+
+class StockReceiptService(InventoryService):
+    async def get_receipt(self, receipt_id: UUID, lock: bool = False) -> StockReceipt:
+        query = select(StockReceipt).options(
+            selectinload(StockReceipt.items).selectinload(StockReceiptItem.product),
+            selectinload(StockReceipt.items).selectinload(StockReceiptItem.variant),
+        ).where(StockReceipt.id == receipt_id, StockReceipt.deleted_at.is_(None))
+        if lock:
+            query = query.with_for_update()
+        receipt = await self.session.scalar(query)
+        if not receipt:
+            raise NotFoundError("Stock receipt not found", "STOCK_RECEIPT_NOT_FOUND")
+        return receipt
+
+    async def list_receipts(self) -> list[StockReceiptResponse]:
+        ids = list((await self.session.scalars(select(StockReceipt.id).where(StockReceipt.deleted_at.is_(None)).order_by(StockReceipt.created_at.desc()).limit(100))).all())
+        return [self.response_receipt(await self.get_receipt(receipt_id)) for receipt_id in ids]
+
+    def response_receipt(self, receipt: StockReceipt) -> StockReceiptResponse:
+        items = [StockReceiptItemResponse(
+            id=item.id, product_id=item.product_id, variant_id=item.variant_id,
+            product_name=item.product.name, sku=item.variant.sku if item.variant else item.product.sku,
+            barcode=item.variant.barcode if item.variant else item.product.barcode,
+            expected_quantity=item.expected_quantity, scanned_quantity=item.scanned_quantity,
+            unit_cost=item.unit_cost, selling_price=item.variant.selling_price if item.variant else item.product.selling_price,
+        ) for item in receipt.items]
+        return StockReceiptResponse(
+            id=receipt.id, reference_number=receipt.reference_number, warehouse_id=receipt.warehouse_id,
+            status=receipt.status, supplier_name=receipt.supplier_name, invoice_number=receipt.invoice_number,
+            purchase_date=receipt.purchase_date, notes=receipt.notes, items=items,
+            total_products=len(items), total_expected=sum(item.expected_quantity for item in items),
+            total_scanned=sum(item.scanned_quantity for item in items),
+            total_purchase_value=sum((Decimal(item.expected_quantity) * item.unit_cost for item in items), Decimal("0")),
+            completed_at=receipt.completed_at, created_at=receipt.created_at,
+        )
+
+    async def create_receipt(self, data: StockReceiptCreate) -> StockReceiptResponse:
+        await self.location(Warehouse, data.warehouse_id)
+        keys = [(item.product_id, item.variant_id) for item in data.items]
+        if len(keys) != len(set(keys)):
+            raise ConflictError("Combine duplicate products before saving the receipt", "STOCK_RECEIPT_DUPLICATE_PRODUCT")
+        receipt = StockReceipt(
+            reference_number=f"PENDING-{uuid4().hex}", warehouse_id=data.warehouse_id,
+            status=StockReceiptStatus.READY_FOR_BARCODE, supplier_name=data.supplier_name,
+            invoice_number=data.invoice_number, purchase_date=data.purchase_date, notes=data.notes,
+            created_by_id=self.actor.id, updated_by_id=self.actor.id,
+        )
+        self.session.add(receipt); await self.session.flush()
+        receipt.reference_number = f"RCV-{utc_now().year}-{str(receipt.id).replace('-', '')[:8].upper()}"
+        for request_item in data.items:
+            product = await self.session.scalar(select(Product).where(Product.id == request_item.product_id, Product.deleted_at.is_(None)))
+            if not product:
+                raise NotFoundError("Product not found", "PRODUCT_NOT_FOUND")
+            if request_item.variant_id and not await self.session.scalar(select(ProductVariant).where(ProductVariant.id == request_item.variant_id, ProductVariant.product_id == request_item.product_id, ProductVariant.deleted_at.is_(None))):
+                raise ConflictError("Variant does not belong to product", "INVENTORY_VARIANT_MISMATCH")
+            self.session.add(StockReceiptItem(receipt_id=receipt.id, product_id=request_item.product_id, variant_id=request_item.variant_id, expected_quantity=request_item.quantity, scanned_quantity=0, unit_cost=request_item.unit_cost))
+        await self.session.flush(); await self.audit("STOCK_RECEIPT_CREATED", "stock_receipt", receipt.id, {"reference": receipt.reference_number, "products": len(data.items)})
+        return self.response_receipt(await self.get_receipt(receipt.id))
+
+    async def scan(self, receipt_id: UUID, code: str) -> StockReceiptResponse:
+        receipt = await self.get_receipt(receipt_id, True)
+        if receipt.status in {StockReceiptStatus.COMPLETED, StockReceiptStatus.CANCELLED}:
+            raise ConflictError("This stock receipt can no longer be scanned", "STOCK_RECEIPT_SCAN_CLOSED")
+        normalized = code.strip().casefold()
+        item = next((line for line in receipt.items if normalized in {
+            (line.variant.sku if line.variant else line.product.sku).casefold(),
+            ((line.variant.barcode if line.variant else line.product.barcode) or "").casefold(),
+        }), None)
+        if not item:
+            raise ConflictError("Barcode not linked to a product in this receipt", "STOCK_RECEIPT_PRODUCT_NOT_FOUND")
+        if item.scanned_quantity >= item.expected_quantity:
+            raise ConflictError("Expected quantity already reached", "STOCK_RECEIPT_OVER_SCAN")
+        item.scanned_quantity += 1; receipt.status = StockReceiptStatus.READY_FOR_SCAN; receipt.updated_by_id = self.actor.id
+        await self.audit("STOCK_RECEIPT_ITEM_SCANNED", "stock_receipt", receipt.id, {"item_id": str(item.id), "scanned": item.scanned_quantity})
+        await self.session.flush(); return self.response_receipt(receipt)
+
+    async def finalize(self, receipt_id: UUID) -> StockReceiptResponse:
+        receipt = await self.get_receipt(receipt_id, True)
+        if receipt.status == StockReceiptStatus.COMPLETED:
+            return self.response_receipt(receipt)
+        if receipt.status == StockReceiptStatus.CANCELLED:
+            raise ConflictError("Cancelled receipt cannot be completed", "STOCK_RECEIPT_CANCELLED")
+        if any(item.scanned_quantity != item.expected_quantity for item in receipt.items):
+            raise ConflictError("Scan every expected item before confirming stock entry", "STOCK_RECEIPT_SCAN_INCOMPLETE")
+        for item in sorted(receipt.items, key=lambda value: str(value.product_id)):
+            inventory = await self.repo.find(item.product_id, item.variant_id, None, receipt.warehouse_id, True)
+            if not inventory:
+                inventory = await self.create(InventoryCreateRequest(product_id=item.product_id, variant_id=item.variant_id, warehouse_id=receipt.warehouse_id, average_cost=Decimal("0")))
+            await self.move(inventory, TransactionType.PURCHASE, item.expected_quantity, receipt.reference_number, f"stock-receipt:{receipt.id}:{item.id}", item.unit_cost, receipt.reference_number, "Verified godown stock receipt")
+        receipt.status = StockReceiptStatus.COMPLETED; receipt.completed_at = utc_now(); receipt.updated_by_id = self.actor.id
+        await self.audit("STOCK_RECEIPT_COMPLETED", "stock_receipt", receipt.id, {"reference": receipt.reference_number})
+        await self.session.flush(); return self.response_receipt(receipt)
+
+    async def cancel(self, receipt_id: UUID) -> StockReceiptResponse:
+        receipt = await self.get_receipt(receipt_id, True)
+        if receipt.status == StockReceiptStatus.COMPLETED:
+            raise ConflictError("Completed stock receipt cannot be cancelled", "STOCK_RECEIPT_COMPLETED")
+        receipt.status = StockReceiptStatus.CANCELLED; receipt.updated_by_id = self.actor.id
+        await self.audit("STOCK_RECEIPT_CANCELLED", "stock_receipt", receipt.id)
+        await self.session.flush(); return self.response_receipt(receipt)
 
 
 class TransferService(InventoryService):

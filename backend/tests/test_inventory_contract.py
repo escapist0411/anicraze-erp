@@ -2,8 +2,8 @@ from decimal import Decimal
 from uuid import uuid4
 import pytest
 from pydantic import ValidationError
-from app.models.inventory import TransferStatus
-from app.schemas.inventory import InventoryCreateRequest, StockMovementRequest, TransferCreateRequest, TransferPickRequest, TransferReceiveRequest
+from app.models.inventory import StockReceiptStatus, TransferStatus
+from app.schemas.inventory import InventoryCreateRequest, StockMovementRequest, StockReceiptCreate, TransferCreateRequest, TransferPickRequest, TransferReceiveRequest
 from app.main import app
 import httpx
 
@@ -48,3 +48,14 @@ def test_multi_product_transfer_and_receipt_contract():
     request=TransferCreateRequest(source_warehouse_id=uuid4(),target_store_id=uuid4(),items=[{"product_id":uuid4(),"quantity":2},{"product_id":uuid4(),"quantity":3}])
     assert len(request.items)==2 and sum(item.quantity for item in request.items)==5
     assert "/api/v1/stock-transfers/{id}/receipt" in {route.path for route in app.routes}
+
+def test_simple_stock_receipt_requires_cost_and_multiple_products():
+    request=StockReceiptCreate(warehouse_id=uuid4(),items=[{"product_id":uuid4(),"quantity":10,"unit_cost":"400"},{"product_id":uuid4(),"quantity":8,"unit_cost":"220"}])
+    assert sum(item.quantity for item in request.items)==18
+    assert request.items[0].unit_cost==Decimal("400")
+    with pytest.raises(ValidationError): StockReceiptCreate(warehouse_id=uuid4(),items=[{"product_id":uuid4(),"quantity":0,"unit_cost":"400"}])
+
+def test_simple_stock_receipt_routes_and_statuses_are_exposed():
+    paths={route.path for route in app.routes}
+    assert {"/api/v1/stock-receipts","/api/v1/stock-receipts/import-pdf","/api/v1/stock-receipts/{id}/scan","/api/v1/stock-receipts/{id}/finalize"}.issubset(paths)
+    assert {StockReceiptStatus.READY_FOR_BARCODE,StockReceiptStatus.READY_FOR_SCAN,StockReceiptStatus.COMPLETED}.issubset(set(StockReceiptStatus))

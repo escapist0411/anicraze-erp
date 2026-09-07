@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, DateTime, Enum, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,7 @@ class ReservationStatus(StrEnum): ACTIVE="ACTIVE"; RELEASED="RELEASED"; CONSUMED
 class AlertType(StrEnum): LOW_STOCK="LOW_STOCK"; OUT_OF_STOCK="OUT_OF_STOCK"; REORDER="REORDER"
 class AlertStatus(StrEnum): OPEN="OPEN"; RESOLVED="RESOLVED"
 class AdjustmentStatus(StrEnum): COMPLETED="COMPLETED"; REVERSED="REVERSED"
+class StockReceiptStatus(StrEnum): DRAFT="DRAFT"; READY_FOR_BARCODE="READY_FOR_BARCODE"; READY_FOR_SCAN="READY_FOR_SCAN"; COMPLETED="COMPLETED"; CANCELLED="CANCELLED"
 
 
 class Store(EntityBase):
@@ -115,3 +116,34 @@ class StockReservation(EntityBase):
 class InventoryAlert(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "inventory_alerts"
     inventory_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("inventory.id", ondelete="CASCADE"), index=True); alert_type: Mapped[AlertType] = mapped_column(Enum(AlertType, native_enum=False, length=30), index=True); status: Mapped[AlertStatus] = mapped_column(Enum(AlertStatus, native_enum=False, length=20), default=AlertStatus.OPEN, index=True); quantity_at_trigger: Mapped[int] = mapped_column(Integer); threshold: Mapped[int] = mapped_column(Integer); resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True)); resolved_by_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class StockReceipt(EntityBase):
+    __tablename__ = "stock_receipts"
+    reference_number: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    warehouse_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("warehouses.id", ondelete="RESTRICT"), index=True)
+    status: Mapped[StockReceiptStatus] = mapped_column(Enum(StockReceiptStatus, native_enum=False, length=30), default=StockReceiptStatus.READY_FOR_BARCODE, index=True)
+    supplier_name: Mapped[str | None] = mapped_column(String(180))
+    invoice_number: Mapped[str | None] = mapped_column(String(100))
+    purchase_date: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    items: Mapped[list["StockReceiptItem"]] = relationship(back_populates="receipt", lazy="selectin", cascade="all, delete-orphan")
+
+
+class StockReceiptItem(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "stock_receipt_items"
+    __table_args__ = (
+        UniqueConstraint("receipt_id", "product_id", "variant_id", name="uq_stock_receipt_product_variant", postgresql_nulls_not_distinct=True),
+        CheckConstraint("expected_quantity > 0 AND scanned_quantity >= 0 AND scanned_quantity <= expected_quantity", name="ck_stock_receipt_quantities"),
+        CheckConstraint("unit_cost >= 0", name="ck_stock_receipt_unit_cost"),
+    )
+    receipt_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("stock_receipts.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("products.id", ondelete="RESTRICT"), index=True)
+    variant_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("product_variants.id", ondelete="RESTRICT"), index=True)
+    expected_quantity: Mapped[int] = mapped_column(Integer)
+    scanned_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    product: Mapped[Product] = relationship()
+    variant: Mapped[ProductVariant | None] = relationship()
+    receipt: Mapped[StockReceipt] = relationship(back_populates="items")

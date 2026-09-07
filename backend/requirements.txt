@@ -10,6 +10,7 @@ psycopg[binary]==3.2.10
 pydantic-settings==2.10.1
 python-barcode==0.16.1
 python-multipart==0.0.20
+pypdf==6.17.0
 reportlab==4.4.3
 PyJWT==2.10.1
 pytest==8.4.1

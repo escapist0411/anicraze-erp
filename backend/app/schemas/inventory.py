@@ -1,10 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.inventory import AlertStatus, AlertType, AdjustmentStatus, LocationStatus, ReservationStatus, TransactionType, TransferStatus
+from app.models.inventory import AlertStatus, AlertType, AdjustmentStatus, LocationStatus, ReservationStatus, StockReceiptStatus, TransactionType, TransferStatus
 
 
 class StrictModel(BaseModel): model_config=ConfigDict(extra="forbid")
@@ -69,3 +69,69 @@ class AlertResponse(BaseModel): model_config=ConfigDict(from_attributes=True); i
 
 
 class InventoryAnalyticsResponse(BaseModel): total_inventory_value:Decimal; total_available_quantity:int; total_reserved_quantity:int; low_stock_count:int; out_of_stock_count:int; reorder_count:int; dead_stock_count:int; fast_moving:list[dict]; slow_moving:list[dict]; top_products:list[dict]; store_comparison:list[dict]; warehouse_comparison:list[dict]
+
+
+class StockReceiptItemCreate(StrictModel):
+    product_id: UUID
+    variant_id: UUID | None = None
+    quantity: int = Field(gt=0, le=100000)
+    unit_cost: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+
+
+class StockReceiptCreate(StrictModel):
+    warehouse_id: UUID
+    supplier_name: str | None = Field(None, max_length=180)
+    invoice_number: str | None = Field(None, max_length=100)
+    purchase_date: date | None = None
+    notes: str | None = Field(None, max_length=2000)
+    items: list[StockReceiptItemCreate] = Field(min_length=1, max_length=200)
+
+
+class StockReceiptScanRequest(StrictModel):
+    code: str = Field(min_length=1, max_length=160)
+
+
+class StockReceiptItemResponse(BaseModel):
+    id: UUID
+    product_id: UUID
+    variant_id: UUID | None
+    product_name: str
+    sku: str
+    barcode: str | None
+    expected_quantity: int
+    scanned_quantity: int
+    unit_cost: Decimal
+    selling_price: Decimal
+
+
+class StockReceiptResponse(BaseModel):
+    id: UUID
+    reference_number: str
+    warehouse_id: UUID
+    status: StockReceiptStatus
+    supplier_name: str | None
+    invoice_number: str | None
+    purchase_date: date | None
+    notes: str | None
+    items: list[StockReceiptItemResponse]
+    total_products: int
+    total_expected: int
+    total_scanned: int
+    total_purchase_value: Decimal
+    completed_at: datetime | None
+    created_at: datetime
+
+
+class StockPdfImportRow(BaseModel):
+    detected_product: str
+    suggested_product_id: UUID | None
+    suggested_product_name: str | None
+    quantity: int
+    unit_cost: Decimal
+    status: str
+
+
+class StockPdfImportPreview(BaseModel):
+    rows: list[StockPdfImportRow]
+    readable_text: bool
+    message: str

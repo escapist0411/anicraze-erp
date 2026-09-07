@@ -1,6 +1,6 @@
 import { api, downloadFile, getData } from './api';
 import type { Page, QueryParams } from '@/types/api';
-import type { BarcodeResult, InventoryAlert, InventoryLocation, InventoryRecord, InventorySummary, InventoryTransaction, StockTransfer } from '@/types/inventory';
+import type { BarcodeResult, InventoryAlert, InventoryLocation, InventoryRecord, InventorySummary, InventoryTransaction, StockPdfImportPreview, StockReceipt, StockTransfer } from '@/types/inventory';
 export const inventoryService={
  list:(params:QueryParams={})=>getData<Page<InventoryRecord>|InventoryRecord[]>('/inventory',params),
  stockReport:()=>getData<InventoryRecord[]>('/inventory/reports/stock'),
@@ -20,4 +20,10 @@ export const inventoryService={
  transfer:async(payload:unknown)=>(await api.post('/stock-transfers',payload)).data.data,
  transferReceipt:(id:string)=>downloadFile(`/stock-transfers/${id}/receipt`),
  generateBarcode:async(productId:string,regenerate=false,format='CODE128')=>{const result=(await api.post<{data:BarcodeResult}>(`/products/${productId}/barcode`,{regenerate,format})).data.data;if(result.image_url&&api.defaults.baseURL)result.image_url=new URL(result.image_url,new URL(api.defaults.baseURL).origin).toString();return result},
-};
+ receipts:()=>getData<StockReceipt[]>('/stock-receipts'),
+ receipt:(id:string)=>getData<StockReceipt>(`/stock-receipts/${id}`),
+ createReceipt:async(payload:unknown)=>(await api.post<{data:StockReceipt}>('/stock-receipts',payload)).data.data,
+ scanReceipt:async(id:string,code:string)=>(await api.post<{data:StockReceipt}>(`/stock-receipts/${id}/scan`,{code})).data.data,
+ finalizeReceipt:async(id:string)=>(await api.post<{data:StockReceipt}>(`/stock-receipts/${id}/finalize`)).data.data,
+ importReceiptPdf:async(file:File)=>{const form=new FormData();form.append('file',file);return (await api.post<{data:StockPdfImportPreview}>('/stock-receipts/import-pdf',form,{headers:{'Content-Type':'multipart/form-data'}})).data.data},
+ };

@@ -2,20 +2,25 @@ from math import ceil
 from uuid import UUID
 import csv
 import io
-from fastapi import APIRouter, Depends, Query, Request, Response
+import re
+from difflib import SequenceMatcher
+from decimal import Decimal
+from pathlib import Path
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen.canvas import Canvas
+from pypdf import PdfReader
 from sqlalchemy import select
 from app.dependencies.auth import DatabaseSession
-from app.exceptions.domain import AuthorizationError, NotFoundError
+from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.models.auth import User
 from app.models.inventory import AlertStatus, Store, TransactionType, Warehouse
 from app.models.catalog import Product
 from app.permissions.dependencies import require_permission
 from app.schemas.common import APIResponse
 from app.schemas.inventory import *
-from app.services.inventory import AdjustmentService, AnalyticsService, InventoryService, ReservationService, TransferService
+from app.services.inventory import AdjustmentService, AnalyticsService, InventoryService, ReservationService, StockReceiptService, TransferService
 
 router=APIRouter(tags=["Inventory management"])
 def service(cls,session,actor,request): return cls(session,actor,request.client.host if request.client else None,request.headers.get("user-agent"))
@@ -28,6 +33,41 @@ async def create_store(data:StoreCreateRequest,request:Request,session:DatabaseS
 async def warehouses(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in await service(InventoryService,session,actor,request).repo.locations(Warehouse)])
 @router.post("/warehouses",response_model=APIResponse[LocationResponse],status_code=201)
 async def create_warehouse(data:WarehouseCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Warehouse,data),from_attributes=True))
+
+@router.get("/stock-receipts",response_model=APIResponse[list[StockReceiptResponse]])
+async def stock_receipts(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).list_receipts())
+@router.post("/stock-receipts",response_model=APIResponse[StockReceiptResponse],status_code=201)
+async def create_stock_receipt(data:StockReceiptCreate,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).create_receipt(data),message="Stock receipt saved")
+@router.get("/stock-receipts/{id}",response_model=APIResponse[StockReceiptResponse])
+async def stock_receipt(id:UUID,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): s=service(StockReceiptService,session,actor,request);return APIResponse(data=s.response_receipt(await s.get_receipt(id)))
+@router.post("/stock-receipts/{id}/scan",response_model=APIResponse[StockReceiptResponse])
+async def scan_stock_receipt(id:UUID,data:StockReceiptScanRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).scan(id,data.code))
+@router.post("/stock-receipts/{id}/finalize",response_model=APIResponse[StockReceiptResponse])
+async def finalize_stock_receipt(id:UUID,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).finalize(id),message="Stock successfully added to Central Warehouse")
+@router.post("/stock-receipts/{id}/cancel",response_model=APIResponse[StockReceiptResponse])
+async def cancel_stock_receipt(id:UUID,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).cancel(id))
+
+@router.post("/stock-receipts/import-pdf",response_model=APIResponse[StockPdfImportPreview])
+async def import_stock_pdf(session:DatabaseSession,actor:User=Depends(require_permission("inventory.create")),file:UploadFile=File(...)):
+    if file.content_type!="application/pdf" or Path(file.filename or "").suffix.lower()!=".pdf": raise ConflictError("Choose a PDF file", "STOCK_PDF_TYPE_INVALID")
+    raw=await file.read(10*1024*1024+1)
+    if len(raw)>10*1024*1024: raise ConflictError("PDF must be smaller than 10 MB", "STOCK_PDF_TOO_LARGE")
+    try: text_content="\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(raw)).pages)
+    except Exception: raise ConflictError("PDF could not be read safely", "STOCK_PDF_INVALID")
+    if not text_content.strip(): return APIResponse(data=StockPdfImportPreview(rows=[],readable_text=False,message="This PDF does not contain readable text. Enter products manually."))
+    products=list((await session.scalars(select(Product).where(Product.deleted_at.is_(None),Product.status=="ACTIVE"))).all())
+    rows=[];pattern=re.compile(r"^\s*(.+?)\s+(\d+)\s+(?:₹|rs\.?|inr)?\s*([\d,]+(?:\.\d{1,2})?)(?:\s+|$)",re.I)
+    for line in text_content.splitlines():
+        match=pattern.match(line)
+        if not match: continue
+        description=" ".join(match.group(1).split())[:240];quantity=int(match.group(2));cost=Decimal(match.group(3).replace(",",""))
+        if quantity<1 or quantity>100000 or cost<0: continue
+        ranked=sorted(((SequenceMatcher(None,description.casefold(),product.name.casefold()).ratio(),product) for product in products),key=lambda value:value[0],reverse=True)
+        score,product=ranked[0] if ranked else (0,None);status="Matched" if score>=.75 else "Needs Review" if score>=.45 else "Not Found"
+        rows.append(StockPdfImportRow(detected_product=description,suggested_product_id=product.id if product and score>=.45 else None,suggested_product_name=product.name if product and score>=.45 else None,quantity=quantity,unit_cost=cost,status=status))
+        if len(rows)>=200: break
+    message="Review every extracted row before adding it to the receipt." if rows else "Readable text was found, but no product rows could be extracted. Enter products manually."
+    return APIResponse(data=StockPdfImportPreview(rows=rows,readable_text=True,message=message))
 
 @router.get("/inventory/transactions",response_model=APIResponse[list[InventoryTransactionResponse]])
 async def transactions(request:Request,session:DatabaseSession,inventory_id:UUID|None=None,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(InventoryService,session,actor,request).repo.transactions(inventory_id))
