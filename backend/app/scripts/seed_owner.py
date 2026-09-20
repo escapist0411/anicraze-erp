@@ -42,7 +42,7 @@ DEMOS = [
 INVENTORY_PERMISSIONS = ["inventory.create", "inventory.update", "inventory.delete", "inventory.analytics"]
 PERMISSIONS.extend(INVENTORY_PERMISSIONS)
 MATRIX["ADMIN"].extend(INVENTORY_PERMISSIONS)
-MATRIX["MANAGER"].extend(["inventory.create", "inventory.update", "inventory.analytics"])
+MATRIX["MANAGER"].extend(["inventory.create", "inventory.update", "inventory.analytics", "products.manage_barcode"])
 MATRIX["INVENTORY"].extend(INVENTORY_PERMISSIONS)
 MATRIX["ACCOUNTANT"].extend(["inventory.read", "inventory.analytics"])
 

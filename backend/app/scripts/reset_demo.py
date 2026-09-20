@@ -17,7 +17,7 @@ TRANSACTION_TABLES = (
     "purchase_return_items", "purchase_returns", "supplier_payments", "supplier_invoice_items", "supplier_invoices",
     "landed_cost_allocations", "landed_cost_components", "landed_cost_documents", "grn_items", "goods_received_notes",
     "purchase_order_items", "purchase_orders", "purchase_request_items", "purchase_requests", "supplier_addresses", "supplier_contacts", "suppliers",
-    "stock_receipt_items", "stock_receipts", "stock_reservations", "stock_transfer_items", "stock_transfers", "stock_adjustment_items", "stock_adjustments",
+    "payment_reminders", "purchase_payment_transactions", "purchase_payables", "stock_receipt_items", "stock_receipts", "stock_reservations", "stock_transfer_items", "stock_transfers", "stock_adjustment_items", "stock_adjustments",
     "inventory_alerts", "inventory_ledger", "inventory_transactions", "refresh_tokens", "password_reset_tokens",
 )
 

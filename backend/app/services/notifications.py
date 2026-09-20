@@ -13,6 +13,7 @@ from app.models.inventory import AlertStatus, AlertType, Inventory, InventoryAle
 from app.models.inventory import InventoryTransaction, TransactionType
 from app.models.notifications import Notification, NotificationCategory, NotificationSeverity
 from app.models.procurement import POStatus, PurchaseOrder
+from app.models.payables import PaymentReminder, PayableStatus, PurchasePayable, PurchasePaymentTransaction, ReminderStatus
 from app.config.settings import get_settings
 
 
@@ -36,7 +37,7 @@ class NotificationService:
                 row.is_resolved=True;row.resolved_at=now;row.resolution_reason="Source condition resolved"
 
     async def reconcile(self):
-        active=set();prefixes={"inventory:","transfer:","transfer_pending:","communication:","procurement:"}
+        active=set();prefixes={"inventory:","transfer:","transfer_pending:","communication:","procurement:","payment:"}
         rows=(await self.session.execute(select(InventoryAlert,Inventory,Product).join(Inventory,Inventory.id==InventoryAlert.inventory_id).join(Product,Product.id==Inventory.product_id).where(InventoryAlert.status==AlertStatus.OPEN,InventoryAlert.alert_type.in_([AlertType.LOW_STOCK,AlertType.OUT_OF_STOCK])))).all()
         for alert,inv,product in rows:
             key=f"inventory:{alert.alert_type.value}:{inv.id}";active.add(key);out=alert.alert_type==AlertType.OUT_OF_STOCK
@@ -55,6 +56,20 @@ class NotificationService:
         po_count=await self.session.scalar(select(func.count(PurchaseOrder.id)).where(PurchaseOrder.status==POStatus.SUBMITTED,PurchaseOrder.deleted_at.is_(None))) or 0
         if po_count:
             key="procurement:po_attention";active.add(key);await self.upsert(key,NotificationCategory.PROCUREMENT,NotificationSeverity.WARNING,"Purchase orders require attention",f"{po_count} purchase order{'s' if po_count!=1 else ''} await approval.",action_path="suppliers")
+        if "OWNER" in {role.code for role in self.actor.roles}:
+            now=datetime.now(timezone.utc)
+            reminders=list((await self.session.scalars(select(PaymentReminder).where(PaymentReminder.status==ReminderStatus.SCHEDULED,PaymentReminder.remind_at<=now).with_for_update(skip_locked=True))).all())
+            for reminder in reminders: reminder.status=ReminderStatus.TRIGGERED;reminder.triggered_at=now
+            payables=list((await self.session.scalars(select(PurchasePayable).where(PurchasePayable.deleted_at.is_(None)))).all())
+            for payable in payables:
+                paid=await self.session.scalar(select(func.coalesce(func.sum(PurchasePaymentTransaction.amount),0)).where(PurchasePaymentTransaction.payable_id==payable.id,PurchasePaymentTransaction.deleted_at.is_(None))) or 0
+                pending=payable.total_amount-paid
+                if pending<=0:continue
+                due_reminder=await self.session.scalar(select(PaymentReminder).where(PaymentReminder.payable_id==payable.id,PaymentReminder.status==ReminderStatus.TRIGGERED).order_by(PaymentReminder.triggered_at.desc()))
+                overdue=bool(payable.due_date and payable.due_date<now.date())
+                if due_reminder or overdue:
+                    key=f"payment:{'overdue' if overdue else 'reminder'}:{payable.id}";active.add(key)
+                    await self.upsert(key,NotificationCategory.PAYMENT,NotificationSeverity.HIGH if overdue else NotificationSeverity.WARNING,"Payment Overdue" if overdue else "Payment Reminder",f"{payable.supplier_name_snapshot}: ₹{pending:,.2f} pending"+(f" · Due {payable.due_date.strftime('%d %b')}" if payable.due_date else ""),"PURCHASE_PAYABLE",payable.id,f"payments")
         threshold=get_settings().large_stock_adjustment_threshold
         adjustments=(await self.session.execute(select(InventoryTransaction,Product).join(Product,Product.id==InventoryTransaction.product_id).where(InventoryTransaction.transaction_type.in_([TransactionType.ADJUSTMENT,TransactionType.DAMAGE]),func.abs(InventoryTransaction.quantity)>=threshold))).all()
         for transaction,product in adjustments:

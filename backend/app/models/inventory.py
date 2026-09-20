@@ -12,6 +12,7 @@ from app.models.catalog import Product, ProductVariant
 
 
 class LocationStatus(StrEnum): ACTIVE = "ACTIVE"; INACTIVE = "INACTIVE"
+class LocationType(StrEnum): PERMANENT_STORE="PERMANENT_STORE"; EVENT_LOCATION="EVENT_LOCATION"
 class TransactionType(StrEnum): PURCHASE="PURCHASE"; SALE="SALE"; RETURN="RETURN"; TRANSFER_IN="TRANSFER_IN"; TRANSFER_OUT="TRANSFER_OUT"; ADJUSTMENT="ADJUSTMENT"; OPENING_STOCK="OPENING_STOCK"; DAMAGE="DAMAGE"; EXPIRED="EXPIRED"
 class TransferStatus(StrEnum): CREATED="CREATED"; PENDING_APPROVAL="PENDING_APPROVAL"; APPROVED="APPROVED"; PICKING="PICKING"; PICKED="PICKED"; PACKED="PACKED"; DISPATCHED="DISPATCHED"; RECEIVING="RECEIVING"; DISCREPANCY="DISCREPANCY"; COMPLETED="COMPLETED"; CANCELLED="CANCELLED"; REJECTED="REJECTED"
 class ReservationStatus(StrEnum): ACTIVE="ACTIVE"; RELEASED="RELEASED"; CONSUMED="CONSUMED"; EXPIRED="EXPIRED"
@@ -24,7 +25,7 @@ class StockReceiptStatus(StrEnum): DRAFT="DRAFT"; READY_FOR_BARCODE="READY_FOR_B
 class Store(EntityBase):
     __tablename__ = "stores"
     code: Mapped[str] = mapped_column(String(40), unique=True, index=True); name: Mapped[str] = mapped_column(String(160), index=True)
-    address: Mapped[str | None] = mapped_column(Text); status: Mapped[LocationStatus] = mapped_column(Enum(LocationStatus, native_enum=False, length=20), default=LocationStatus.ACTIVE, index=True)
+    address: Mapped[str | None] = mapped_column(Text); contact_number: Mapped[str | None] = mapped_column(String(30)); location_type: Mapped[LocationType] = mapped_column(Enum(LocationType,native_enum=False,length=30),default=LocationType.PERMANENT_STORE,index=True); status: Mapped[LocationStatus] = mapped_column(Enum(LocationStatus, native_enum=False, length=20), default=LocationStatus.ACTIVE, index=True)
 
 
 class Warehouse(EntityBase):

@@ -3,10 +3,12 @@ from math import ceil
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.models.auth import AuditLog, Permission, RevocationReason, Role, User, UserStatus, role_permissions, user_permissions, user_roles
+from app.models.inventory import Store
 from app.repositories.management import ManagementRepository
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.schemas.management import PermissionCreateRequest, PermissionUpdateRequest, RoleCreateRequest, RolePermissionAssignmentRequest, RoleUpdateRequest, UserCreateRequest, UserResponse, UserUpdateRequest
@@ -38,19 +40,30 @@ class ManagementService:
         if data.employee_code and await self.repo.user_by_employee_code(data.employee_code): raise ConflictError("Employee code already exists", "USER_EMPLOYEE_CODE_EXISTS")
         roles = await self.repo.roles_by_ids(data.role_ids)
         if len(roles) != len(set(data.role_ids)): raise NotFoundError("One or more roles were not found", "ROLE_NOT_FOUND")
-        draft = User(email=data.email, full_name=data.name.strip(), phone=data.phone, employee_code=data.employee_code, designation=data.designation, department=data.department, assigned_store_id=data.assigned_store_id, status=data.status, is_active=data.status == UserStatus.ACTIVE, password_hash="", created_by_id=self.actor.id, updated_by_id=self.actor.id)
+        employee_role=bool({r.code for r in roles}&{"SALES","EMPLOYEE"})
+        if employee_role and not data.assigned_store_id: raise ConflictError("Sales employees must be assigned to one selling location","EMPLOYEE_STORE_REQUIRED")
+        store=await self.session.scalar(select(Store).where(Store.id==data.assigned_store_id,Store.deleted_at.is_(None))) if data.assigned_store_id else None
+        if data.assigned_store_id and not store: raise NotFoundError("Assigned selling location not found","STORE_NOT_FOUND")
+        employee_code=data.employee_code
+        if employee_role and not employee_code:
+            count=await self.session.scalar(select(func.count(User.id)).where(User.assigned_store_id==store.id)) or 0
+            employee_code=f"EMP-{store.code.upper()}-{count+1:03d}"
+        draft = User(email=data.email, full_name=data.name.strip(), phone=data.phone, employee_code=employee_code, designation=data.designation, department=data.department, assigned_store_id=data.assigned_store_id, status=data.status, is_active=data.status == UserStatus.ACTIVE, password_hash="", created_by_id=self.actor.id, updated_by_id=self.actor.id)
         self.passwords.validate_new_password(data.password, draft); draft.password_hash = self.passwords.hash(data.password); draft.roles = roles
         self.session.add(draft); await self.session.flush(); await self.session.refresh(draft, attribute_names=["roles", "direct_permissions"]); await self._audit("USER_CREATED", "user", draft.id, draft.id, {"roles": [r.code for r in roles]}); return draft
 
     async def update_user(self, user_id: UUID, data: UserUpdateRequest) -> User:
         user = await self.get_user(user_id, True); changes = data.model_dump(exclude_unset=True)
+        if "assigned_store_id" in changes:
+            if changes["assigned_store_id"] is None and {r.code for r in user.roles}&{"SALES","EMPLOYEE"}: raise ConflictError("Sales employees must remain assigned to one selling location","EMPLOYEE_STORE_REQUIRED")
+            if changes["assigned_store_id"] and not await self.session.scalar(select(Store.id).where(Store.id==changes["assigned_store_id"],Store.deleted_at.is_(None))): raise NotFoundError("Assigned selling location not found","STORE_NOT_FOUND")
         if "employee_code" in changes and changes["employee_code"]:
             duplicate = await self.repo.user_by_employee_code(str(changes["employee_code"]))
             if duplicate and duplicate.id != user.id: raise ConflictError("Employee code already exists", "USER_EMPLOYEE_CODE_EXISTS")
         before = {k: str(getattr(user, "full_name" if k == "name" else k)) for k in changes}
         for key, value in changes.items(): setattr(user, "full_name" if key == "name" else key, value)
         if data.status is not None: user.is_active = data.status == UserStatus.ACTIVE
-        user.updated_by_id = self.actor.id; await self.session.flush(); await self._audit("USER_UPDATED", "user", user.id, user.id, {"before": before, "changed_fields": list(changes)}); return user
+        user.updated_by_id = self.actor.id; await self.session.flush(); await self._audit("EMPLOYEE_SHOP_CHANGED" if "assigned_store_id" in changes else "USER_UPDATED", "user", user.id, user.id, {"before": before, "changed_fields": list(changes)}); return user
 
     async def ensure_owner_change_allowed(self, user: User) -> None:
         if any(r.code == "OWNER" for r in user.roles) and await self.repo.active_owner_count() <= 1:

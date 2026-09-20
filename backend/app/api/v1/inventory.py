@@ -18,6 +18,7 @@ from app.models.auth import User
 from app.models.inventory import AlertStatus, Store, TransactionType, Warehouse
 from app.models.catalog import Product
 from app.permissions.dependencies import require_permission
+from app.permissions.dependencies import require_owner
 from app.schemas.common import APIResponse
 from app.schemas.inventory import *
 from app.services.inventory import AdjustmentService, AnalyticsService, InventoryService, ReservationService, StockReceiptService, TransferService
@@ -28,11 +29,18 @@ def service(cls,session,actor,request): return cls(session,actor,request.client.
 @router.get("/stores",response_model=APIResponse[list[LocationResponse]])
 async def stores(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in await service(InventoryService,session,actor,request).repo.locations(Store)])
 @router.post("/stores",response_model=APIResponse[LocationResponse],status_code=201)
-async def create_store(data:StoreCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Store,data),from_attributes=True))
+async def create_store(data:StoreCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_owner)): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Store,data),from_attributes=True))
+@router.patch("/stores/{id}",response_model=APIResponse[LocationResponse])
+async def update_store(id:UUID,data:StoreUpdateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_owner)):
+    store=await session.scalar(select(Store).where(Store.id==id,Store.deleted_at.is_(None)).with_for_update())
+    if not store:raise NotFoundError("Store not found","STORE_NOT_FOUND")
+    changes=data.model_dump(exclude_unset=True);before={key:str(getattr(store,key)) for key in changes}
+    for key,value in changes.items():setattr(store,key,value)
+    store.updated_by_id=actor.id;svc=service(InventoryService,session,actor,request);await svc.audit("STORE_UPDATED","store",store.id,{"before":before,"changed_fields":list(changes)});await session.flush();return APIResponse(data=LocationResponse.model_validate(store,from_attributes=True))
 @router.get("/warehouses",response_model=APIResponse[list[LocationResponse]])
 async def warehouses(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in await service(InventoryService,session,actor,request).repo.locations(Warehouse)])
 @router.post("/warehouses",response_model=APIResponse[LocationResponse],status_code=201)
-async def create_warehouse(data:WarehouseCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Warehouse,data),from_attributes=True))
+async def create_warehouse(data:WarehouseCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_owner)): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Warehouse,data),from_attributes=True))
 
 @router.get("/stock-receipts",response_model=APIResponse[list[StockReceiptResponse]])
 async def stock_receipts(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).list_receipts())

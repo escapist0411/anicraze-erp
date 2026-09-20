@@ -12,11 +12,20 @@ from app.config.settings import get_settings
 from app.database.session import AsyncSessionFactory
 from app.models.auth import User, UserStatus, user_roles
 from app.models.catalog import Product, ProductStatus
-from app.models.inventory import Inventory, LocationStatus, Store, StoreInventory, Warehouse, WarehouseInventory
+from app.models.inventory import Inventory, LocationStatus, LocationType, Store, StoreInventory, Warehouse, WarehouseInventory
 from app.scripts.import_final_catalog import import_catalog
 from app.scripts.seed_owner import seed_rbac
 
-DEMO_STORE_CODE = "DEMO_SHOP"
+DEMO_STORES = (
+    ("CHI", "ANICRAZE Chinchwad", LocationType.PERMANENT_STORE),
+    ("WES", "ANICRAZE Westend", LocationType.PERMANENT_STORE),
+    ("CIV", "ANICRAZE Civil Metro", LocationType.PERMANENT_STORE),
+    ("SWA", "ANICRAZE Swargate Metro", LocationType.PERMANENT_STORE),
+    ("KAL", "ANICRAZE Kalyani Metro", LocationType.PERMANENT_STORE),
+    ("SHI", "ANICRAZE Shivaji Metro", LocationType.PERMANENT_STORE),
+    ("EV1", "ANICRAZE Event 1", LocationType.EVENT_LOCATION),
+    ("EV2", "ANICRAZE Event 2", LocationType.EVENT_LOCATION),
+)
 DEMO_WAREHOUSE_CODE = "ANICRAZE_CWH"
 SELECTED_PRODUCTS = (
     "Naruto Rasengan", "Kakashi Chidori", "Tanjiro Standing", "Luffy Sitting — Variant 1",
@@ -49,12 +58,13 @@ async def seed_demo() -> dict[str, object]:
     async with AsyncSessionFactory() as session:
         await session.execute(text("SELECT pg_advisory_xact_lock(1602027)"))
         roles = await seed_rbac(session)
-        store = await session.scalar(select(Store).where(Store.code == DEMO_STORE_CODE))
-        if store is None:
-            store = Store(code=DEMO_STORE_CODE, name="ANICRAZE Demo Shop", address="Demo environment only", status=LocationStatus.ACTIVE)
-            session.add(store); await session.flush()
-        else:
-            store.name, store.status, store.deleted_at = "ANICRAZE Demo Shop", LocationStatus.ACTIVE, None
+        stores=[]
+        for code,name,kind in DEMO_STORES:
+            store=await session.scalar(select(Store).where(Store.code==code))
+            if store is None:store=Store(code=code,name=name,location_type=kind,address=None,status=LocationStatus.ACTIVE);session.add(store);await session.flush()
+            else:store.name,store.location_type,store.status,store.deleted_at=name,kind,LocationStatus.ACTIVE,None
+            stores.append(store)
+        store=stores[0]
         warehouse = await session.scalar(select(Warehouse).where(Warehouse.code == DEMO_WAREHOUSE_CODE))
         if warehouse is None:
             warehouse = Warehouse(code=DEMO_WAREHOUSE_CODE, name="ANICRAZE Central Warehouse", address="Demo environment only", status=LocationStatus.ACTIVE)
@@ -93,7 +103,7 @@ async def seed_demo() -> dict[str, object]:
                     session.add(StoreInventory(inventory_id=inventory.id, store_id=store.id) if location_type == "store" else WarehouseInventory(inventory_id=inventory.id, warehouse_id=warehouse.id))
                 inventory_rows += 1
         await session.commit()
-        return {"users": seeded_users, "store": store.name, "warehouse": warehouse.name, "selected_products": len(products), "zero_stock_inventory_rows": inventory_rows}
+        return {"users": seeded_users, "stores": [x.name for x in stores], "warehouse": warehouse.name, "selected_products": len(products), "zero_stock_inventory_rows": inventory_rows}
 
 
 if __name__ == "__main__":

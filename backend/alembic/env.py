@@ -6,7 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from app.config.settings import get_settings
 from app.database.base import Base
 from app.database.url import normalize_database_url
-from app.models import auth, billing, catalog, crm, hr, inventory, notifications, procurement, reports
+from app.models import auth, billing, catalog, crm, hr, inventory, notifications, payables, procurement, reports
 
 config = context.config
 settings = get_settings()

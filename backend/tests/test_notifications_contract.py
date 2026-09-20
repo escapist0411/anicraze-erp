@@ -15,5 +15,5 @@ def test_notification_model_has_stable_per_user_deduplication():
 
 def test_phase7_uses_small_consistent_taxonomy_and_configured_threshold():
     assert {x.value for x in NotificationSeverity} == {"INFO","WARNING","HIGH","CRITICAL"}
-    assert {x.value for x in NotificationCategory} == {"INVENTORY","TRANSFER","PROCUREMENT","COMMUNICATION","REPORT","SYSTEM"}
+    assert {x.value for x in NotificationCategory} == {"INVENTORY","TRANSFER","PROCUREMENT","PAYMENT","COMMUNICATION","REPORT","SYSTEM"}
     assert get_settings().large_stock_adjustment_threshold > 0

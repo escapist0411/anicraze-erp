@@ -1,0 +1,4 @@
+export type PayableStatus='UNPAID'|'PARTIALLY_PAID'|'PAID'|'OVERDUE';
+export interface PurchasePayment{id:string;amount:string;payment_method:string;payment_date:string;reference_number:string|null;notes:string|null;created_at:string}
+export interface PurchasePayable{id:string;supplier_id:string;supplier_name:string;stock_receipt_id:string|null;reference_number:string;invoice_number:string|null;invoice_date:string;total_amount:string;amount_paid:string;pending_amount:string;status:PayableStatus;due_date:string|null;next_reminder_at:string|null;reminder_enabled:boolean;notes:string|null;payments:PurchasePayment[];reminders:{id:string;remind_at:string;status:string;triggered_at:string|null;dismissed_at:string|null;snoozed_from_id:string|null}[];created_at:string;updated_at:string}
+export interface PayableSummary{total_purchase_value:string;total_paid:string;total_pending:string;overdue:string;due_this_week:string;next_payment:PurchasePayable|null}
