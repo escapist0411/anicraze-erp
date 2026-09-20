@@ -63,19 +63,19 @@ class PayableService:
         if data.initially_paid > data.total_amount: raise ConflictError("Initial payment cannot exceed purchase total", "PAYABLE_PAYMENT_EXCEEDS_TOTAL")
         if data.initially_paid and not data.initial_payment_method: raise ConflictError("Payment method is required", "PAYABLE_PAYMENT_METHOD_REQUIRED")
         if data.stock_receipt_id and await self.session.scalar(select(PurchasePayable.id).where(PurchasePayable.stock_receipt_id==data.stock_receipt_id)): raise ConflictError("This receipt already has a payable", "PAYABLE_RECEIPT_EXISTS")
-        row=PurchasePayable(supplier_id=supplier.id, stock_receipt_id=data.stock_receipt_id, reference_number=f"PAY-{date.today().year}-{uuid4().hex[:8].upper()}", invoice_number=data.invoice_number, invoice_date=data.invoice_date, supplier_name_snapshot=supplier.display_name, total_amount=data.total_amount, status=PayableStatus.UNPAID, due_date=data.due_date, reminder_enabled=bool(data.remind_at), notes=data.notes, created_by_id=self.actor.id, updated_by_id=self.actor.id)
+        row=PurchasePayable(supplier_id=supplier.id, stock_receipt_id=data.stock_receipt_id, reference_number=f"PAY-{date.today().year}-{uuid4().hex[:8].upper()}", invoice_number=data.invoice_number, invoice_date=data.invoice_date, supplier_name_snapshot=supplier.display_name, total_amount=data.total_amount, status=PayableStatus.UNPAID, due_date=data.due_date, reminder_enabled=bool(data.remind_at), notes=data.notes, payments=[], reminders=[], created_by_id=self.actor.id, updated_by_id=self.actor.id)
         self.session.add(row); await self.session.flush()
         if data.initially_paid:
-            self.session.add(PurchasePaymentTransaction(payable_id=row.id, amount=data.initially_paid, payment_method=data.initial_payment_method, payment_date=data.invoice_date, reference_number="Initial payment", created_by_id=self.actor.id, updated_by_id=self.actor.id))
+            row.payments.append(PurchasePaymentTransaction(payable_id=row.id, amount=data.initially_paid, payment_method=data.initial_payment_method, payment_date=data.invoice_date, reference_number="Initial payment", created_by_id=self.actor.id, updated_by_id=self.actor.id))
         if data.remind_at:
-            self.session.add(PaymentReminder(payable_id=row.id, remind_at=data.remind_at, status=ReminderStatus.SCHEDULED, created_by_id=self.actor.id, updated_by_id=self.actor.id))
+            row.reminders.append(PaymentReminder(payable_id=row.id, remind_at=data.remind_at, status=ReminderStatus.SCHEDULED, created_by_id=self.actor.id, updated_by_id=self.actor.id))
         await self.session.flush(); await self.audit("PURCHASE_PAYABLE_CREATED", row.id, {"total": str(row.total_amount), "initially_paid": str(data.initially_paid)})
         return self.response(await self.get(row.id))
 
     async def record_payment(self, payable_id: UUID, data: PaymentCreate) -> PayableResponse:
         row=await self.get(payable_id, True); paid=self.paid(row); pending=row.total_amount-paid
         if row.status==PayableStatus.PAID or data.amount>pending: raise ConflictError("Payment exceeds the pending amount", "PAYABLE_PAYMENT_EXCEEDS_PENDING")
-        tx=PurchasePaymentTransaction(payable_id=row.id, **data.model_dump(), created_by_id=self.actor.id, updated_by_id=self.actor.id); self.session.add(tx); await self.session.flush()
+        tx=PurchasePaymentTransaction(payable_id=row.id, **data.model_dump(), created_by_id=self.actor.id, updated_by_id=self.actor.id); row.payments.append(tx); await self.session.flush()
         new_paid=paid+data.amount; row.status=self.status(row,new_paid);row.updated_by_id=self.actor.id
         if row.status==PayableStatus.PAID:
             for reminder in row.reminders:
@@ -92,7 +92,7 @@ class PayableService:
         if previous:
             previous.status=ReminderStatus.CANCELLED if previous.status==ReminderStatus.SCHEDULED else ReminderStatus.DISMISSED
             if previous.status==ReminderStatus.DISMISSED:previous.dismissed_at=datetime.now(timezone.utc)
-        reminder=PaymentReminder(payable_id=row.id,remind_at=remind_at,status=ReminderStatus.SCHEDULED,snoozed_from_id=previous.id if previous else None,created_by_id=self.actor.id,updated_by_id=self.actor.id);self.session.add(reminder);row.reminder_enabled=True
+        reminder=PaymentReminder(payable_id=row.id,remind_at=remind_at,status=ReminderStatus.SCHEDULED,snoozed_from_id=previous.id if previous else None,created_by_id=self.actor.id,updated_by_id=self.actor.id);row.reminders.append(reminder);row.reminder_enabled=True
         await self.audit("PAYMENT_REMINDER_SCHEDULED",row.id,{"remind_at":remind_at.isoformat()});await self.session.flush();return self.response(await self.get(row.id))
 
     async def dismiss_reminder(self,payable_id:UUID,reminder_id:UUID)->PayableResponse:
