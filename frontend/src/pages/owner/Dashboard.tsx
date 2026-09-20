@@ -28,11 +28,10 @@ function ManagementDashboard() {
   if(query.isError)return <div className="mx-auto max-w-xl rounded-xl border bg-card p-8 text-center"><AlertTriangle className="mx-auto size-8 text-destructive"/><h2 className="mt-3 font-semibold">Dashboard unavailable</h2><p className="mt-2 text-sm text-muted-foreground">{getApiErrorMessage(query.error)}</p><button onClick={()=>query.refetch()} className="mt-5 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"><RefreshCw className="size-4"/>Retry</button></div>;
   const data=query.data;const trend=data.sales_trend.map(point=>({label:point.date,revenue:Number(point.revenue),profit:0,orders:point.orders}));
   const kpis=[
-    {label:'Net sales (excl. GST)',value:formatCurrency(data.kpis.net_sales),change:'Live',trend:trend.map(x=>x.revenue),tone:'indigo',icon:'revenue'},
+    {label:'Net sales',value:formatCurrency(data.kpis.net_sales),change:'Live',trend:trend.map(x=>x.revenue),tone:'indigo',icon:'revenue'},
     {label:'Estimated operating profit',value:formatCurrency(data.kpis.estimated_net_operating_profit),change:'Live',trend:trend.map(x=>x.revenue),tone:'emerald',icon:'profit'},
     {label:'Inventory value',value:formatCurrency(data.inventory_summary.inventory_value),change:'Live',trend:[data.inventory_summary.available_units],tone:'amber',icon:'inventory'},
     {label:'Orders',value:String(data.kpis.orders),change:'Live',trend:trend.map(x=>x.orders),tone:'rose',icon:'orders'},
-    {label:'GST collected',value:formatCurrency(data.kpis.gst_collected),change:'Live',trend:[Number(data.kpis.gst_collected)],tone:'sky',icon:'sales'},
     {label:'Expenses',value:formatCurrency(data.kpis.expenses),change:'Live',trend:[Number(data.kpis.expenses)],tone:'orange',icon:'pending'},
     {label:'Low stock',value:String(data.inventory_summary.low_stock_count),change:'Live',trend:[data.inventory_summary.low_stock_count],tone:'violet',icon:'inventory'},
     {label:'Active employees',value:String(data.active_employees),change:'Live',trend:[data.active_employees],tone:'cyan',icon:'customers'},

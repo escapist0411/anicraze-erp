@@ -143,12 +143,11 @@ class ProductService(CatalogServiceBase):
 
     def validate_pricing_values(self, values: dict, current: Product | None = None):
         get = lambda key, default=None: values.get(key, getattr(current, key, default) if current else default)
-        purchase, landed, selling, mrp, minimum, gst = get("purchase_price", 0), get("landed_cost"), get("selling_price", 0), get("mrp"), get("minimum_selling_price"), get("gst_rate", 0)
+        purchase, landed, selling, mrp, minimum = get("purchase_price", 0), get("landed_cost"), get("selling_price", 0), get("mrp"), get("minimum_selling_price")
         if any(v is not None and v < 0 for v in (purchase, landed, selling, mrp, minimum)): raise ConflictError("Prices cannot be negative", "PRODUCT_PRICING_INVALID")
         if landed is not None and landed < purchase: raise ConflictError("Landed cost cannot be below purchase price", "PRODUCT_PRICING_INVALID")
         if mrp is not None and mrp < selling: raise ConflictError("MRP cannot be below selling price", "PRODUCT_PRICING_INVALID")
         if minimum is not None and minimum > selling: raise ConflictError("Minimum selling price cannot exceed selling price", "PRODUCT_PRICING_INVALID")
-        if gst not in APPROVED_GST_RATES: raise ConflictError("GST rate is not approved", "PRODUCT_GST_INVALID")
 
     async def create(self, data: ProductCreateRequest, *, audit_event: str = "PRODUCT_CREATED") -> Product:
         category, anime_id = await self.validate_refs(data.category_id, data.brand_id, data.anime_id, data.character_id)
@@ -156,7 +155,7 @@ class ProductService(CatalogServiceBase):
         if data.sku and await self.repo.product_by_sku(sku, True): raise ConflictError("SKU already exists", "PRODUCT_SKU_EXISTS")
         while not data.sku and await self.repo.product_by_sku(sku, True): sku = await self.skus.generate(self.session, category.code)
         if data.barcode and await self.repo.product_by_barcode(data.barcode): raise ConflictError("Barcode already exists", "PRODUCT_BARCODE_EXISTS")
-        values = data.model_dump(exclude={"generate_barcode", "variants"}); values.update(sku=sku, anime_id=anime_id, slug=await self.unique_slug(Product, data.name), created_by_id=self.actor.id, updated_by_id=self.actor.id)
+        values = data.model_dump(exclude={"generate_barcode", "variants"}); values.update(sku=sku, anime_id=anime_id, hsn_code=None, gst_rate=Decimal("0"), slug=await self.unique_slug(Product, data.name), created_by_id=self.actor.id, updated_by_id=self.actor.id)
         product = Product(**values); self.session.add(product); await self.session.flush(); await self.session.refresh(product, attribute_names=["category", "brand", "anime", "character", "images", "variants"])
         for variant_data in data.variants:
             variant_sku = variant_data.sku.upper() if variant_data.sku else await self.skus.generate(self.session, category.code)
@@ -174,7 +173,7 @@ class ProductService(CatalogServiceBase):
         return product
 
     async def update(self, product_id: UUID, data: ProductUpdateRequest):
-        product = await self.get(product_id, True); values = data.model_dump(exclude_unset=True); self.validate_pricing_values(values, product)
+        product = await self.get(product_id, True); values = data.model_dump(exclude_unset=True); values.pop("hsn_code",None); values.pop("gst_rate",None); self.validate_pricing_values(values, product)
         category_id = values.get("category_id", product.category_id); brand_id = values.get("brand_id", product.brand_id); anime_id = values.get("anime_id", product.anime_id); character_id = values.get("character_id", product.character_id)
         _, anime_id = await self.validate_refs(category_id, brand_id, anime_id, character_id); values["anime_id"] = anime_id
         if values.get("sku"):

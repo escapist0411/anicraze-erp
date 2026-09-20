@@ -24,8 +24,14 @@ class StockReceiptStatus(StrEnum): DRAFT="DRAFT"; READY_FOR_BARCODE="READY_FOR_B
 
 class Store(EntityBase):
     __tablename__ = "stores"
-    code: Mapped[str] = mapped_column(String(40), unique=True, index=True); name: Mapped[str] = mapped_column(String(160), index=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True); name: Mapped[str] = mapped_column(String(160), index=True); short_name: Mapped[str | None] = mapped_column(String(100))
     address: Mapped[str | None] = mapped_column(Text); contact_number: Mapped[str | None] = mapped_column(String(30)); location_type: Mapped[LocationType] = mapped_column(Enum(LocationType,native_enum=False,length=30),default=LocationType.PERMANENT_STORE,index=True); status: Mapped[LocationStatus] = mapped_column(Enum(LocationStatus, native_enum=False, length=20), default=LocationStatus.ACTIVE, index=True)
+
+
+class EmployeeLocationSequence(UUIDMixin, Base):
+    __tablename__ = "employee_location_sequences"
+    store_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("stores.id", ondelete="CASCADE"), unique=True, index=True)
+    current_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class Warehouse(EntityBase):

@@ -62,19 +62,19 @@ class ReportingService:
         start, end = resolve_date_range(filters); store_id = scoped_store(self.actor, filters.store_id)
         invoice_where = [Invoice.created_at >= start, Invoice.created_at < end, Invoice.invoice_status.in_([InvoiceStatus.COMPLETED,InvoiceStatus.RETURNED]), Invoice.deleted_at.is_(None)]
         if store_id: invoice_where.append(Invoice.store_id == store_id)
-        gross_sales,discounts,taxable,orders,gst,customers = (await self.session.execute(select(func.coalesce(func.sum(Invoice.subtotal),0),func.coalesce(func.sum(Invoice.discount),0),func.coalesce(func.sum(Invoice.taxable_amount),0),func.count(Invoice.id),func.coalesce(func.sum(Invoice.gst_total),0),func.count(func.distinct(Invoice.customer_id))).where(*invoice_where))).one()
+        gross_sales,discounts,net_billed,orders,customers = (await self.session.execute(select(func.coalesce(func.sum(Invoice.subtotal),0),func.coalesce(func.sum(Invoice.discount),0),func.coalesce(func.sum(Invoice.grand_total),0),func.count(Invoice.id),func.count(func.distinct(Invoice.customer_id))).where(*invoice_where))).one()
         units=await self.session.scalar(select(func.coalesce(func.sum(InvoiceItem.quantity),0)).join(Invoice).where(*invoice_where)) or 0
         cost_q = select(func.coalesce(func.sum(InvoiceItem.quantity * Inventory.average_cost), 0)).join(Invoice, Invoice.id == InvoiceItem.invoice_id).join(Inventory, Inventory.id == InvoiceItem.inventory_id).where(*invoice_where)
         sold_cost = Decimal(await self.session.scalar(cost_q) or ZERO)
         return_where=[Return.created_at>=start,Return.created_at<end,Return.status==ReturnStatus.COMPLETED]
         if store_id:return_where.append(Invoice.store_id==store_id)
         returned_total,returned_cost,returned_taxable = (await self.session.execute(select(func.coalesce(func.sum(ReturnItem.amount),0),func.coalesce(func.sum(ReturnItem.quantity*Inventory.average_cost),0),func.coalesce(func.sum(ReturnItem.amount*Invoice.taxable_amount/func.nullif(Invoice.grand_total,0)),0)).join(Return,Return.id==ReturnItem.return_id).join(InvoiceItem,InvoiceItem.id==ReturnItem.invoice_item_id).join(Inventory,Inventory.id==InvoiceItem.inventory_id).join(Invoice,Invoice.id==Return.invoice_id).where(*return_where))).one()
-        net_sales=Decimal(taxable)-Decimal(returned_taxable);cost=max(ZERO,sold_cost-Decimal(returned_cost))
+        net_sales=Decimal(net_billed)-Decimal(returned_total);cost=max(ZERO,sold_cost-Decimal(returned_cost))
         exp_where = [Expense.expense_date >= start.date(), Expense.expense_date < end.date(), Expense.status == ExpenseStatus.APPROVED, Expense.deleted_at.is_(None)]
         if store_id: exp_where.append(Expense.store_id == store_id)
         expenses = await self.session.scalar(select(func.coalesce(func.sum(Expense.amount), 0)).where(*exp_where)) or ZERO
-        refunds=Decimal(returned_total);net_gst=max(ZERO,Decimal(gst)-(refunds-Decimal(returned_taxable)));gross_profit=net_sales-cost;operating=gross_profit-Decimal(expenses)
-        return {"date_range":{"from":start,"to":end},"store_id":store_id,"gross_sales":Decimal(gross_sales),"discounts":Decimal(discounts),"taxable_sales":Decimal(taxable),"returns":refunds,"refunds":refunds,"net_sales":net_sales,"revenue":net_sales,"orders":int(orders),"products_sold":max(0,int(units)),"customers":int(customers),"gst_collected":net_gst,"cost_of_goods_sold":cost,"gross_profit":gross_profit,"expenses":Decimal(expenses),"estimated_net_operating_profit":operating,"net_profit":operating,"average_order_value":net_sales/orders if orders else ZERO}
+        refunds=Decimal(returned_total);gross_profit=net_sales-cost;operating=gross_profit-Decimal(expenses)
+        return {"date_range":{"from":start,"to":end},"store_id":store_id,"gross_sales":Decimal(gross_sales),"discounts":Decimal(discounts),"returns":refunds,"refunds":refunds,"net_sales":net_sales,"revenue":net_sales,"orders":int(orders),"products_sold":max(0,int(units)),"customers":int(customers),"cost_of_goods_sold":cost,"gross_profit":gross_profit,"expenses":Decimal(expenses),"estimated_net_operating_profit":operating,"net_profit":operating,"average_order_value":net_sales/orders if orders else ZERO}
 
     async def inventory_summary(self, filters: ReportFilterRequest) -> dict:
         store_id = scoped_store(self.actor, filters.store_id); where = [Inventory.deleted_at.is_(None)]
@@ -87,7 +87,7 @@ class ReportingService:
     async def sales_trend(self, filters: ReportFilterRequest) -> list[dict]:
         start, end = resolve_date_range(filters); store_id = scoped_store(self.actor, filters.store_id); where = [Invoice.created_at >= start, Invoice.created_at < end, Invoice.invoice_status.in_([InvoiceStatus.COMPLETED,InvoiceStatus.RETURNED]), Invoice.deleted_at.is_(None)]
         if store_id: where.append(Invoice.store_id == store_id)
-        rows = (await self.session.execute(select(func.date(Invoice.created_at), func.sum(Invoice.taxable_amount), func.count(Invoice.id)).where(*where).group_by(func.date(Invoice.created_at)).order_by(func.date(Invoice.created_at)))).all()
+        rows = (await self.session.execute(select(func.date(Invoice.created_at), func.sum(Invoice.grand_total), func.count(Invoice.id)).where(*where).group_by(func.date(Invoice.created_at)).order_by(func.date(Invoice.created_at)))).all()
         return [{"date": d, "revenue": Decimal(v), "orders": n} for d, v, n in rows]
 
     async def top_products(self, filters: ReportFilterRequest, limit=10) -> list[dict]:

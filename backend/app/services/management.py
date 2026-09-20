@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.models.auth import AuditLog, Permission, RevocationReason, Role, User, UserStatus, role_permissions, user_permissions, user_roles
-from app.models.inventory import Store
+from app.models.inventory import EmployeeLocationSequence, Store
 from app.repositories.management import ManagementRepository
 from app.repositories.refresh_tokens import RefreshTokenRepository
 from app.schemas.management import PermissionCreateRequest, PermissionUpdateRequest, RoleCreateRequest, RolePermissionAssignmentRequest, RoleUpdateRequest, UserCreateRequest, UserResponse, UserUpdateRequest
@@ -46,8 +46,12 @@ class ManagementService:
         if data.assigned_store_id and not store: raise NotFoundError("Assigned selling location not found","STORE_NOT_FOUND")
         employee_code=data.employee_code
         if employee_role and not employee_code:
-            count=await self.session.scalar(select(func.count(User.id)).where(User.assigned_store_id==store.id)) or 0
-            employee_code=f"EMP-{store.code.upper()}-{count+1:03d}"
+            await self.session.execute(insert(EmployeeLocationSequence).values(store_id=store.id,current_value=0).on_conflict_do_nothing(index_elements=[EmployeeLocationSequence.store_id]))
+            sequence=await self.session.scalar(select(EmployeeLocationSequence).where(EmployeeLocationSequence.store_id==store.id).with_for_update())
+            highest=await self.session.scalar(select(func.max(User.employee_code)).where(User.employee_code.like(f"EMP-{store.code.upper()}-%")))
+            used=int(highest.rsplit("-",1)[-1]) if highest and highest.rsplit("-",1)[-1].isdigit() else 0
+            sequence.current_value=max(sequence.current_value,used)+1
+            employee_code=f"EMP-{store.code.upper()}-{sequence.current_value:03d}"
         draft = User(email=data.email, full_name=data.name.strip(), phone=data.phone, employee_code=employee_code, designation=data.designation, department=data.department, assigned_store_id=data.assigned_store_id, status=data.status, is_active=data.status == UserStatus.ACTIVE, password_hash="", created_by_id=self.actor.id, updated_by_id=self.actor.id)
         self.passwords.validate_new_password(data.password, draft); draft.password_hash = self.passwords.hash(data.password); draft.roles = roles
         self.session.add(draft); await self.session.flush(); await self.session.refresh(draft, attribute_names=["roles", "direct_permissions"]); await self._audit("USER_CREATED", "user", draft.id, draft.id, {"roles": [r.code for r in roles]}); return draft

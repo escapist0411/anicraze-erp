@@ -9,10 +9,10 @@ from app.models.payables import PayablePaymentMethod
 
 
 class StrictModel(BaseModel): model_config=ConfigDict(extra="forbid")
-class StoreCreateRequest(StrictModel): code:str=Field(min_length=2,max_length=40); name:str=Field(min_length=2,max_length=160); location_type:LocationType=LocationType.PERMANENT_STORE; address:str|None=None; contact_number:str|None=Field(None,max_length=30); status:LocationStatus=LocationStatus.ACTIVE
-class StoreUpdateRequest(StrictModel): name:str|None=Field(None,min_length=2,max_length=160); location_type:LocationType|None=None; address:str|None=None; contact_number:str|None=Field(None,max_length=30); status:LocationStatus|None=None
+class StoreCreateRequest(StrictModel): code:str=Field(min_length=2,max_length=40); name:str=Field(min_length=2,max_length=160); short_name:str|None=Field(None,max_length=100); location_type:LocationType=LocationType.PERMANENT_STORE; address:str|None=None; contact_number:str|None=Field(None,max_length=30); status:LocationStatus=LocationStatus.ACTIVE
+class StoreUpdateRequest(StrictModel): name:str|None=Field(None,min_length=2,max_length=160); short_name:str|None=Field(None,max_length=100); location_type:LocationType|None=None; address:str|None=None; contact_number:str|None=Field(None,max_length=30); status:LocationStatus|None=None
 class WarehouseCreateRequest(StrictModel): code:str=Field(min_length=2,max_length=40); name:str=Field(min_length=2,max_length=160); address:str|None=None; status:LocationStatus=LocationStatus.ACTIVE
-class LocationResponse(BaseModel): id:UUID; code:str; name:str; address:str|None; contact_number:str|None=None; location_type:LocationType|None=None; status:LocationStatus
+class LocationResponse(BaseModel): id:UUID; code:str; name:str; short_name:str|None=None; address:str|None; contact_number:str|None=None; location_type:LocationType|None=None; status:LocationStatus
 
 
 class InventoryCreateRequest(StrictModel):

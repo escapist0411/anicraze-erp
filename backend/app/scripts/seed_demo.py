@@ -17,14 +17,14 @@ from app.scripts.import_final_catalog import import_catalog
 from app.scripts.seed_owner import seed_rbac
 
 DEMO_STORES = (
-    ("CHI", "ANICRAZE Chinchwad", LocationType.PERMANENT_STORE),
-    ("WES", "ANICRAZE Westend", LocationType.PERMANENT_STORE),
-    ("CIV", "ANICRAZE Civil Metro", LocationType.PERMANENT_STORE),
-    ("SWA", "ANICRAZE Swargate Metro", LocationType.PERMANENT_STORE),
-    ("KAL", "ANICRAZE Kalyani Metro", LocationType.PERMANENT_STORE),
-    ("SHI", "ANICRAZE Shivaji Metro", LocationType.PERMANENT_STORE),
-    ("EV1", "ANICRAZE Event 1", LocationType.EVENT_LOCATION),
-    ("EV2", "ANICRAZE Event 2", LocationType.EVENT_LOCATION),
+    ("ELPRO", "ANICRAZE Elpro City Square Mall", "Elpro Chinchwad", "Elpro City Square Mall,\nChinchwad Gaon,\nChinchwad,\nPune,\nPimpri-Chinchwad,\nMaharashtra 411033", LocationType.PERMANENT_STORE),
+    ("WESTEND", "ANICRAZE Westend Mall", "Westend Mall", "Ground Floor,\nWESTEND MALL,\nWard No. 8,\nWireless Colony,\nAundh,\nPune,\nMaharashtra 411067", LocationType.PERMANENT_STORE),
+    ("CIVIL", "ANICRAZE Civil Court Metro Station", "Civil Court Metro", "Civil Court Metro Station,\nPune,\nMaharashtra", LocationType.PERMANENT_STORE),
+    ("SWARGATE", "ANICRAZE Swargate Metro Station", "Swargate Metro", "Swargate Metro Station,\nPune,\nMaharashtra", LocationType.PERMANENT_STORE),
+    ("KALYANI", "ANICRAZE Kalyani Nagar Metro Station", "Kalyani Nagar Metro", "Kalyani Nagar Metro Station,\nPune,\nMaharashtra", LocationType.PERMANENT_STORE),
+    ("SHIVAJI", "ANICRAZE Shivaji Nagar Metro Station", "Shivaji Nagar Metro", "Shivaji Nagar Metro Station,\nPune,\nMaharashtra", LocationType.PERMANENT_STORE),
+    ("EVENT1", "ANICRAZE Event 1", "Event 1", None, LocationType.EVENT_LOCATION),
+    ("EVENT2", "ANICRAZE Event 2", "Event 2", None, LocationType.EVENT_LOCATION),
 )
 DEMO_WAREHOUSE_CODE = "ANICRAZE_CWH"
 SELECTED_PRODUCTS = (
@@ -59,10 +59,10 @@ async def seed_demo() -> dict[str, object]:
         await session.execute(text("SELECT pg_advisory_xact_lock(1602027)"))
         roles = await seed_rbac(session)
         stores=[]
-        for code,name,kind in DEMO_STORES:
+        for code,name,short_name,address,kind in DEMO_STORES:
             store=await session.scalar(select(Store).where(Store.code==code))
-            if store is None:store=Store(code=code,name=name,location_type=kind,address=None,status=LocationStatus.ACTIVE);session.add(store);await session.flush()
-            else:store.name,store.location_type,store.status,store.deleted_at=name,kind,LocationStatus.ACTIVE,None
+            if store is None:store=Store(code=code,name=name,short_name=short_name,location_type=kind,address=address,status=LocationStatus.ACTIVE);session.add(store);await session.flush()
+            else:store.name,store.short_name,store.address,store.location_type,store.status,store.deleted_at=name,short_name,address,kind,LocationStatus.ACTIVE,None
             stores.append(store)
         store=stores[0]
         warehouse = await session.scalar(select(Warehouse).where(Warehouse.code == DEMO_WAREHOUSE_CODE))
@@ -82,7 +82,7 @@ async def seed_demo() -> dict[str, object]:
                 user.full_name, user.password_hash = full_name, hash_password(credentials[variable])
             user.status, user.is_active, user.deleted_at = UserStatus.ACTIVE, True, None
             user.assigned_store_id = store.id if role_code != "OWNER" else None
-            user.employee_code = employee_code
+            user.employee_code = "EMP-ELPRO-001" if role_code == "SALES" else employee_code
             user.must_change_password = False
             await session.execute(insert(user_roles).values(user_id=user.id, role_id=roles[role_code].id).on_conflict_do_nothing())
             seeded_users.append(email)

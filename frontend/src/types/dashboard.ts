@@ -1,4 +1,4 @@
-export interface DashboardKpis { gross_sales:string; discounts:string; taxable_sales:string; returns:string; net_sales:string; revenue:string; orders:number; gst_collected:string; cost_of_goods_sold:string; gross_profit:string; expenses:string; refunds:string; estimated_net_operating_profit:string; net_profit:string; average_order_value:string }
+export interface DashboardKpis { gross_sales:string; discounts:string; returns:string; net_sales:string; revenue:string; orders:number; cost_of_goods_sold:string; gross_profit:string; expenses:string; refunds:string; estimated_net_operating_profit:string; net_profit:string; average_order_value:string }
 export interface InventorySummary { inventory_value:string; available_units:number; low_stock_count:number; out_of_stock_count:number; damaged_units:number; godown_units:number; shop_units:number; in_transit_units:number }
 export interface SalesTrendPoint { date: string; revenue: string; orders: number }
 export interface StorePerformancePoint { store_id:string; store_name:string; net_sales:string; revenue:string; orders:number; average_order_value:string }

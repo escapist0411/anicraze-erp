@@ -9,7 +9,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.models.auth import AuditLog, User
 from app.models.billing import *
@@ -22,26 +22,30 @@ from app.schemas.billing import *
 from app.services.inventory import InventoryService
 from app.utils.time import utc_now
 
-MONEY=Decimal("0.01"); GST_RATES={Decimal("0"),Decimal("5"),Decimal("12"),Decimal("18"),Decimal("28")}
+MONEY=Decimal("0.01")
 def money(v): return Decimal(v).quantize(MONEY,rounding=ROUND_HALF_UP)
 
+# Backward-compatible calculator retained for historical integrations only.
+# New sales and procurement flows never call it.
 class GSTService:
     @staticmethod
     def calculate(taxable:Decimal,rate:Decimal,interstate:bool):
-        if rate not in GST_RATES: raise ConflictError("GST rate must be 0, 5, 12, 18 or 28 percent","BILLING_GST_INVALID")
+        if rate not in {Decimal("0"),Decimal("5"),Decimal("12"),Decimal("18"),Decimal("28")}:
+            raise ConflictError("Unsupported historical tax rate", "LEGACY_TAX_RATE_INVALID")
         total=money(taxable*rate/100)
         if interstate: return Decimal("0.00"),Decimal("0.00"),total
         cgst=money(total/2); return cgst,total-cgst,Decimal("0.00")
 
 class InvoicePDFService:
     root=Path(__file__).resolve().parents[2]/"generated"/"invoices"
-    def generate(self,invoice:Invoice,customer:Customer,store:Store):
+    def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User):
         self.root.mkdir(parents=True,exist_ok=True); path=self.root/f"{invoice.invoice_number}.pdf"; styles=getSampleStyleSheet()
-        doc=SimpleDocTemplate(str(path),pagesize=A4,rightMargin=14*mm,leftMargin=14*mm,topMargin=12*mm,bottomMargin=12*mm,title=f"GST Invoice {invoice.invoice_number}")
-        story=[Paragraph("<b>ANICRAZE</b>",styles["Title"]),Paragraph("TAX INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>{customer.address or ''}<br/>GSTIN: {customer.gstin or 'Unregistered'}",styles["BodyText"]),Spacer(1,5*mm)]
-        rows=[["SKU / Product","HSN","Qty","Rate","Discount","GST","Amount"]]+[[f"{x.sku}\n{x.product_name}",x.hsn_code or "-",str(x.quantity),f"{x.unit_price:.2f}",f"{x.discount:.2f}",f"{x.gst_rate}%",f"{x.line_total:.2f}"] for x in invoice.items]
-        table=Table(rows,colWidths=[65*mm,18*mm,12*mm,22*mm,22*mm,15*mm,25*mm],repeatRows=1); table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#111827")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP"),("ALIGN",(2,1),(-1,-1),"RIGHT")]))
-        story += [table,Spacer(1,5*mm),Table([["Taxable",f"INR {invoice.taxable_amount:.2f}"],["CGST",f"INR {invoice.cgst:.2f}"],["SGST",f"INR {invoice.sgst:.2f}"],["IGST",f"INR {invoice.igst:.2f}"],["Round off",f"INR {invoice.round_off:.2f}"],["Grand Total",f"INR {invoice.grand_total:.2f}"]],colWidths=[40*mm,35*mm],hAlign="RIGHT",style=[("GRID",(0,0),(-1,-1),.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),("FONTNAME",(0,-1),(-1,-1),"Helvetica-Bold")]),Spacer(1,7*mm),Paragraph("[ QR PAYMENT / VERIFICATION ]",styles["Heading3"]),Paragraph("Terms: Goods once sold may be returned only under the ANICRAZE return policy. This is a computer-generated GST invoice.",styles["BodyText"]),Spacer(1,4*mm),Paragraph("Thank you for shopping with ANICRAZE.",styles["Heading3"])]
+        doc=SimpleDocTemplate(str(path),pagesize=A4,rightMargin=14*mm,leftMargin=14*mm,topMargin=12*mm,bottomMargin=12*mm,title=f"Invoice {invoice.invoice_number}")
+        logo=Image(str(Path(__file__).resolve().parents[1]/"assets"/"anicraze-logo.png"),width=50*mm,height=16.67*mm)
+        story=[logo,Paragraph("INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}<br/>Address: {(store.address or 'Address not provided').replace(chr(10), '<br/>')}<br/>Employee: {employee.full_name} ({employee.employee_code or '—'})",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>{customer.address or ''}",styles["BodyText"]),Spacer(1,5*mm)]
+        rows=[["SKU / Product","Qty","Rate","Discount","Amount"]]+[[f"{x.sku}\n{x.product_name}",str(x.quantity),f"{x.unit_price:.2f}",f"{x.discount:.2f}",f"{x.line_total:.2f}"] for x in invoice.items]
+        table=Table(rows,colWidths=[85*mm,15*mm,25*mm,25*mm,28*mm],repeatRows=1); table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#111827")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP"),("ALIGN",(1,1),(-1,-1),"RIGHT")]))
+        story += [table,Spacer(1,5*mm),Table([["Subtotal",f"INR {invoice.subtotal:.2f}"],["Discount",f"INR {invoice.discount:.2f}"],["Grand Total",f"INR {invoice.grand_total:.2f}"]],colWidths=[40*mm,35*mm],hAlign="RIGHT",style=[("GRID",(0,0),(-1,-1),.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),("FONTNAME",(0,-1),(-1,-1),"Helvetica-Bold")]),Spacer(1,7*mm),Paragraph("Terms: Goods once sold may be returned only under the ANICRAZE return policy. This is a computer-generated invoice.",styles["BodyText"]),Spacer(1,4*mm),Paragraph("Thank you for shopping with ANICRAZE.",styles["Heading3"])]
         doc.build(story); return path
 
 class WhatsAppService:
@@ -84,8 +88,7 @@ class BillingService:
         raw_subtotal=sum((money((locked[i.inventory_id].variant.selling_price if locked[i.inventory_id].variant else locked[i.inventory_id].product.selling_price)*i.quantity) for i in data.items),Decimal(0))
         if data.invoice_discount>raw_subtotal: raise ConflictError("Invoice discount exceeds subtotal","BILLING_DISCOUNT_INVALID")
         invoice=Invoice(invoice_number=await self.invoices.next_number(),idempotency_key=data.idempotency_key,customer_id=customer.id,store_id=store.id,employee_id=self.actor.id,subtotal=raw_subtotal,discount=Decimal(0),taxable_amount=0,cgst=0,sgst=0,igst=0,gst_total=0,grand_total=0,round_off=0,payment_status=PaymentStatus.PENDING,invoice_status=InvoiceStatus.DRAFT,notes=data.notes,created_by_id=self.actor.id,updated_by_id=self.actor.id); self.s.add(invoice); await self.s.flush()
-        subtotal=discount=taxable=cgst=sgst=igst=Decimal(0); interstate=data.customer_state_code!="27"; created_items=[]
-        tax_buckets={}
+        subtotal=discount=Decimal(0); created_items=[]
         for index,requested in enumerate(data.items):
             inv=locked[requested.inventory_id]; product=inv.product; price=money(inv.variant.selling_price if inv.variant else product.selling_price)
             minimum=product.minimum_selling_price
@@ -95,14 +98,12 @@ class BillingService:
             if index==len(data.items)-1: allocated=data.invoice_discount-discount
             line_discount=money(requested.discount+allocated)
             if line_discount>gross: raise ConflictError("Line discount exceeds line value","BILLING_DISCOUNT_INVALID")
-            base=money(gross-line_discount); rate=Decimal(product.gst_rate); c,s,i=GSTService.calculate(base,rate,interstate); tax=c+s+i; total=money(base+tax)
-            item=InvoiceItem(invoice_id=invoice.id,inventory_id=inv.id,product_id=product.id,variant_id=inv.variant_id,sku=inv.variant.sku if inv.variant else product.sku,product_name=product.name,hsn_code=product.hsn_code,quantity=requested.quantity,unit_price=price,discount=line_discount,gst_rate=rate,taxable_amount=base,tax_amount=tax,line_total=total); self.s.add(item); created_items.append(item)
-            subtotal+=gross; discount+=line_discount; taxable+=base; cgst+=c; sgst+=s; igst+=i
-            bucket=tax_buckets.setdefault(rate,[Decimal(0)]*5); bucket[0]+=base; bucket[1]+=c; bucket[2]+=s; bucket[3]+=i; bucket[4]+=tax
-        exact=money(taxable+cgst+sgst+igst); grand=exact.quantize(Decimal("1"),rounding=ROUND_HALF_UP); invoice.subtotal=money(subtotal); invoice.discount=money(discount); invoice.taxable_amount=money(taxable); invoice.cgst=money(cgst); invoice.sgst=money(sgst); invoice.igst=money(igst); invoice.gst_total=money(cgst+sgst+igst); invoice.round_off=money(grand-exact); invoice.grand_total=grand
+            base=money(gross-line_discount)
+            item=InvoiceItem(invoice_id=invoice.id,inventory_id=inv.id,product_id=product.id,variant_id=inv.variant_id,sku=inv.variant.sku if inv.variant else product.sku,product_name=product.name,hsn_code=None,quantity=requested.quantity,unit_price=price,discount=line_discount,gst_rate=0,taxable_amount=base,tax_amount=0,line_total=base); self.s.add(item); created_items.append(item)
+            subtotal+=gross; discount+=line_discount
+        grand=money(subtotal-discount); invoice.subtotal=money(subtotal); invoice.discount=money(discount); invoice.taxable_amount=grand; invoice.cgst=0; invoice.sgst=0; invoice.igst=0; invoice.gst_total=0; invoice.round_off=0; invoice.grand_total=grand
         paid=sum((p.amount for p in data.payments),Decimal(0))
         if paid!=grand: raise ConflictError("Payment total must equal invoice total","BILLING_PAYMENT_TOTAL_MISMATCH")
-        for rate,values in tax_buckets.items(): self.s.add(InvoiceTax(invoice_id=invoice.id,gst_rate=rate,taxable_amount=money(values[0]),cgst=money(values[1]),sgst=money(values[2]),igst=money(values[3]),total_tax=money(values[4])))
         if data.invoice_discount: self.s.add(InvoiceDiscount(invoice_id=invoice.id,description="Invoice discount",amount=data.invoice_discount))
         for p in data.payments:
             method=await self.payments.method(p.method)
@@ -118,7 +119,7 @@ class BillingService:
         await self.s.flush(); await self.s.refresh(invoice,attribute_names=["items","payments","created_at"])
         from app.services.crm import CustomerCRMIntegration
         await CustomerCRMIntegration(self.s,self.actor,self.ip,self.user_agent).invoice_completed(invoice)
-        try: invoice.pdf_path=str(InvoicePDFService().generate(invoice,customer,store))
+        try: invoice.pdf_path=str(InvoicePDFService().generate(invoice,customer,store,self.actor))
         except Exception: logging.getLogger(__name__).exception("Invoice PDF generation failed for %s",invoice.invoice_number)
         await self.audit("INVOICE_COMPLETED","invoice",invoice.id,{"number":invoice.invoice_number,"total":str(invoice.grand_total),"store_id":str(store.id)}); await self.s.flush(); return await self.invoices.get(invoice.id)
     async def cancel(self,id,reason):
@@ -160,7 +161,7 @@ class BillingAnalyticsService:
     async def summary(self):
         now=utc_now(); start_day=now.replace(hour=0,minute=0,second=0,microsecond=0); completed=(Invoice.invoice_status.in_([InvoiceStatus.COMPLETED,InvoiceStatus.RETURNED]),)
         async def sales(since): return Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed,Invoice.created_at>=since)) or 0)
-        monthly=await sales(now-timedelta(days=30)); count=int(await self.s.scalar(select(func.count()).select_from(Invoice).where(*completed)) or 0); total=Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed)) or 0); gst=Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.gst_total),0)).where(*completed)) or 0)
+        monthly=await sales(now-timedelta(days=30)); count=int(await self.s.scalar(select(func.count()).select_from(Invoice).where(*completed)) or 0); total=Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed)) or 0)
         products=(await self.s.execute(select(InvoiceItem.product_name,func.sum(InvoiceItem.quantity).label("qty")).join(Invoice).where(*completed).group_by(InvoiceItem.product_name).order_by(func.sum(InvoiceItem.quantity).desc()).limit(10))).all()
         methods=(await self.s.execute(select(PaymentMethod.name,func.sum(Payment.amount)).join(Payment).group_by(PaymentMethod.name))).all()
-        return BillingAnalytics(today_sales=await sales(start_day),weekly_sales=await sales(now-timedelta(days=7)),monthly_sales=monthly,average_bill=money(total/count) if count else Decimal(0),gst_collected=gst,invoice_count=count,top_products=[{"product":x[0],"quantity":int(x[1])} for x in products],payment_methods=[{"method":x[0],"amount":str(x[1])} for x in methods])
+        return BillingAnalytics(today_sales=await sales(start_day),weekly_sales=await sales(now-timedelta(days=7)),monthly_sales=monthly,average_bill=money(total/count) if count else Decimal(0),invoice_count=count,top_products=[{"product":x[0],"quantity":int(x[1])} for x in products],payment_methods=[{"method":x[0],"amount":str(x[1])} for x in methods])
