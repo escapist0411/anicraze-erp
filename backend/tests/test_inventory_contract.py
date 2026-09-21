@@ -5,6 +5,9 @@ from pydantic import ValidationError
 from app.models.inventory import StockReceiptStatus, TransferStatus
 from app.schemas.inventory import InventoryCreateRequest, StockMovementRequest, StockReceiptCreate, TransferCreateRequest, TransferPickRequest, TransferReceiveRequest
 from app.main import app
+from app.services.inventory import StockReceiptService
+from app.exceptions.domain import AuthorizationError, ConflictError
+from types import SimpleNamespace
 import httpx
 
 def test_inventory_requires_exactly_one_location():
@@ -55,7 +58,32 @@ def test_simple_stock_receipt_requires_cost_and_multiple_products():
     assert request.items[0].unit_cost==Decimal("400")
     with pytest.raises(ValidationError): StockReceiptCreate(warehouse_id=uuid4(),items=[{"product_id":uuid4(),"quantity":0,"unit_cost":"400"}])
 
+def actor_with_role(code):
+    return SimpleNamespace(roles=[SimpleNamespace(code=code)])
+
+def test_stock_receipt_accepts_no_supplier_for_owner_and_manager():
+    request=StockReceiptCreate(warehouse_id=uuid4(),supplier_id=None,supplier_name=None,items=[{"product_id":uuid4(),"quantity":10,"purchase_cost":"400"}])
+    StockReceiptService.validate_payable_request(request,actor_with_role("OWNER"))
+    StockReceiptService.validate_payable_request(request,actor_with_role("MANAGER"))
+    assert request.supplier_id is None and request.supplier_name is None and request.items[0].unit_cost==Decimal("400")
+
+def test_stock_receipt_accepts_optional_supplier_reference():
+    supplier_id=uuid4()
+    request=StockReceiptCreate(warehouse_id=uuid4(),supplier_id=supplier_id,supplier_name="Existing Supplier",items=[{"product_id":uuid4(),"quantity":10,"unit_cost":"400"}])
+    StockReceiptService.validate_payable_request(request,actor_with_role("OWNER"))
+    assert request.supplier_id==supplier_id and request.supplier_name=="Existing Supplier"
+
+def test_purchase_payable_requires_supplier_with_approved_message():
+    request=StockReceiptCreate(warehouse_id=uuid4(),payment_option="PAY_LATER",items=[{"product_id":uuid4(),"quantity":10,"unit_cost":"400"}])
+    with pytest.raises(ConflictError,match="Select a supplier to track this purchase payment"):
+        StockReceiptService.validate_payable_request(request,actor_with_role("OWNER"))
+
+def test_manager_cannot_create_purchase_payable():
+    request=StockReceiptCreate(warehouse_id=uuid4(),supplier_id=uuid4(),payment_option="PAY_LATER",items=[{"product_id":uuid4(),"quantity":10,"unit_cost":"400"}])
+    with pytest.raises(AuthorizationError):
+        StockReceiptService.validate_payable_request(request,actor_with_role("MANAGER"))
+
 def test_simple_stock_receipt_routes_and_statuses_are_exposed():
     paths={route.path for route in app.routes}
-    assert {"/api/v1/stock-receipts","/api/v1/stock-receipts/import-pdf","/api/v1/stock-receipts/{id}/scan","/api/v1/stock-receipts/{id}/finalize"}.issubset(paths)
+    assert {"/api/v1/stock-receipts","/api/v1/stock-receipt-suppliers","/api/v1/stock-receipts/import-pdf","/api/v1/stock-receipts/{id}/scan","/api/v1/stock-receipts/{id}/finalize"}.issubset(paths)
     assert {StockReceiptStatus.READY_FOR_BARCODE,StockReceiptStatus.READY_FOR_SCAN,StockReceiptStatus.COMPLETED}.issubset(set(StockReceiptStatus))

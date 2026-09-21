@@ -86,6 +86,16 @@ class InventoryService:
 
 
 class StockReceiptService(InventoryService):
+    @staticmethod
+    def validate_payable_request(data: StockReceiptCreate, actor: User) -> None:
+        if not data.payment_option:
+            return
+        roles = {role.code for role in actor.roles}
+        if not roles.intersection({"OWNER", "ADMIN"}):
+            raise AuthorizationError("Purchase payment information is restricted to the Owner", "PAYABLE_OWNER_REQUIRED")
+        if not data.supplier_id:
+            raise ConflictError("Select a supplier to track this purchase payment.", "PAYABLE_SUPPLIER_REQUIRED")
+
     async def get_receipt(self, receipt_id: UUID, lock: bool = False) -> StockReceipt:
         query = select(StockReceipt).options(
             selectinload(StockReceipt.items).selectinload(StockReceiptItem.product),
@@ -121,6 +131,7 @@ class StockReceiptService(InventoryService):
         )
 
     async def create_receipt(self, data: StockReceiptCreate) -> StockReceiptResponse:
+        self.validate_payable_request(data, self.actor)
         await self.location(Warehouse, data.warehouse_id)
         keys = [(item.product_id, item.variant_id) for item in data.items]
         if len(keys) != len(set(keys)):
@@ -142,8 +153,6 @@ class StockReceiptService(InventoryService):
             self.session.add(StockReceiptItem(receipt_id=receipt.id, product_id=request_item.product_id, variant_id=request_item.variant_id, expected_quantity=request_item.quantity, scanned_quantity=0, unit_cost=request_item.unit_cost))
         await self.session.flush(); await self.audit("STOCK_RECEIPT_CREATED", "stock_receipt", receipt.id, {"reference": receipt.reference_number, "products": len(data.items)})
         if data.payment_option:
-            if not data.supplier_id:
-                raise ConflictError("Select a supplier to create a purchase payment", "PAYABLE_SUPPLIER_REQUIRED")
             total=sum((Decimal(item.quantity)*item.unit_cost for item in data.items),Decimal("0"))
             initially_paid=total if data.payment_option=="FULLY_PAID" else data.initially_paid if data.payment_option=="PARTIALLY_PAID" else Decimal("0")
             await PayableService(self.session,self.actor,self.ip,self.user_agent).create(PayableCreate(supplier_id=data.supplier_id,stock_receipt_id=receipt.id,invoice_number=data.invoice_number,invoice_date=data.purchase_date or utc_now().date(),total_amount=total,initially_paid=initially_paid,initial_payment_method=data.initial_payment_method,due_date=data.payment_due_date,remind_at=data.payment_remind_at,notes=data.notes))

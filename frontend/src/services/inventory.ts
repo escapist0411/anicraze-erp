@@ -21,6 +21,7 @@ export const inventoryService={
  transferReceipt:(id:string)=>downloadFile(`/stock-transfers/${id}/receipt`),
  generateBarcode:async(productId:string,regenerate=false,format='CODE128')=>{const result=(await api.post<{data:BarcodeResult}>(`/products/${productId}/barcode`,{regenerate,format})).data.data;if(result.image_url&&api.defaults.baseURL)result.image_url=new URL(result.image_url,new URL(api.defaults.baseURL).origin).toString();return result},
  receipts:()=>getData<StockReceipt[]>('/stock-receipts'),
+ receiptSuppliers:()=>getData<{id:string;display_name:string}[]>('/stock-receipt-suppliers'),
  receipt:(id:string)=>getData<StockReceipt>(`/stock-receipts/${id}`),
  createReceipt:async(payload:unknown)=>(await api.post<{data:StockReceipt}>('/stock-receipts',payload)).data.data,
  scanReceipt:async(id:string,code:string)=>(await api.post<{data:StockReceipt}>(`/stock-receipts/${id}/scan`,{code})).data.data,

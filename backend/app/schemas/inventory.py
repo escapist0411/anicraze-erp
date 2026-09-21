@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.models.inventory import AlertStatus, AlertType, AdjustmentStatus, LocationStatus, LocationType, ReservationStatus, StockReceiptStatus, TransactionType, TransferStatus
 from app.models.payables import PayablePaymentMethod
@@ -77,7 +77,7 @@ class StockReceiptItemCreate(StrictModel):
     product_id: UUID
     variant_id: UUID | None = None
     quantity: int = Field(gt=0, le=100000)
-    unit_cost: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    unit_cost: Decimal = Field(ge=0, max_digits=14, decimal_places=2, validation_alias=AliasChoices("unit_cost", "purchase_cost"))
 
 
 class StockReceiptCreate(StrictModel):
