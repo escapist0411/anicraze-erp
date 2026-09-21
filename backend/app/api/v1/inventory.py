@@ -47,7 +47,7 @@ async def create_warehouse(data:WarehouseCreateRequest,request:Request,session:D
 async def stock_receipts(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).list_receipts())
 @router.get("/stock-receipt-suppliers",response_model=APIResponse[list[dict]])
 async def stock_receipt_suppliers(session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))):
-    rows=list((await session.scalars(select(Supplier).where(Supplier.deleted_at.is_(None),Supplier.is_active.is_(True)).order_by(Supplier.display_name))).all())
+    rows=list((await session.scalars(select(Supplier).where(Supplier.deleted_at.is_(None),Supplier.status=="ACTIVE").order_by(Supplier.display_name))).all())
     return APIResponse(data=[{"id":str(row.id),"display_name":row.display_name} for row in rows])
 @router.post("/stock-receipts",response_model=APIResponse[StockReceiptResponse],status_code=201)
 async def create_stock_receipt(data:StockReceiptCreate,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): return APIResponse(data=await service(StockReceiptService,session,actor,request).create_receipt(data),message="Stock receipt saved")
