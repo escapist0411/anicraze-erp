@@ -9,16 +9,17 @@ export function BarcodeScanner({ onScan, placeholder = 'Scan barcode or enter SK
   const [camera, setCamera] = useState(false);
   const [error, setError] = useState('');
   const video = useRef<HTMLVideoElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const stream = useRef<MediaStream | null>(null);
   const controls = useRef<IScannerControls | null>(null);
   const last = useRef({ value: '', at: 0 });
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
 
-  const emit = (raw: string) => {
+  const emit = (raw: string, cameraResult = false) => {
     const value = raw.trim();
     if (!value) return;
-    if (value !== last.current.value || Date.now() - last.current.at > 1200) {
+    if (!cameraResult || value !== last.current.value || Date.now() - last.current.at > 1200) {
       last.current = { value, at: Date.now() };
       onScanRef.current(value);
     }
@@ -27,6 +28,7 @@ export function BarcodeScanner({ onScan, placeholder = 'Scan barcode or enter SK
   const submitManual = () => {
     emit(input);
     setInput('');
+    requestAnimationFrame(() => inputRef.current?.focus());
   };
 
   useEffect(() => {
@@ -56,7 +58,7 @@ export function BarcodeScanner({ onScan, placeholder = 'Scan barcode or enter SK
       video.current.srcObject = stream.current;
       await video.current.play();
       controls.current = await reader.decodeFromStream(stream.current, video.current, (result) => {
-        if (result?.getText()) emit(result.getText());
+        if (result?.getText()) emit(result.getText(), true);
       });
     };
 
@@ -73,7 +75,7 @@ export function BarcodeScanner({ onScan, placeholder = 'Scan barcode or enter SK
     <div className="space-y-3">
       <label className="flex min-h-12 items-center rounded-lg border bg-background px-3">
         <ScanLine className="size-4 text-primary" />
-        <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitManual(); } }} className="min-w-0 flex-1 bg-transparent px-2 outline-none" placeholder={placeholder} />
+        <input ref={inputRef} autoFocus value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitManual(); } }} className="min-w-0 flex-1 bg-transparent px-2 outline-none" placeholder={placeholder} />
         <button type="button" onClick={submitManual} className="min-h-10 rounded-md px-3 text-xs font-semibold">Search</button>
       </label>
       <button type="button" onClick={() => { setError(''); setCamera((value) => !value); }} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border font-semibold">

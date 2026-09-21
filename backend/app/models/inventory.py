@@ -101,7 +101,13 @@ class StockTransfer(EntityBase):
 
 class StockTransferItem(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "stock_transfer_items"
-    transfer_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("stock_transfers.id", ondelete="CASCADE"), index=True); product_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("products.id", ondelete="RESTRICT"), index=True); variant_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("product_variants.id", ondelete="RESTRICT")); quantity: Mapped[int] = mapped_column(Integer); picked_quantity: Mapped[int] = mapped_column(Integer,default=0); received_quantity: Mapped[int] = mapped_column(Integer,default=0); damaged_quantity: Mapped[int] = mapped_column(Integer,default=0); shortage_quantity: Mapped[int] = mapped_column(Integer,default=0); excess_quantity: Mapped[int] = mapped_column(Integer,default=0); batch_number: Mapped[str | None] = mapped_column(String(100)); discrepancy_note: Mapped[str | None] = mapped_column(Text); transfer: Mapped[StockTransfer] = relationship(back_populates="items")
+    transfer_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("stock_transfers.id", ondelete="CASCADE"), index=True); product_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("products.id", ondelete="RESTRICT"), index=True); variant_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True), ForeignKey("product_variants.id", ondelete="RESTRICT")); quantity: Mapped[int] = mapped_column(Integer); picked_quantity: Mapped[int] = mapped_column(Integer,default=0); received_quantity: Mapped[int] = mapped_column(Integer,default=0); damaged_quantity: Mapped[int] = mapped_column(Integer,default=0); shortage_quantity: Mapped[int] = mapped_column(Integer,default=0); excess_quantity: Mapped[int] = mapped_column(Integer,default=0); batch_number: Mapped[str | None] = mapped_column(String(100)); discrepancy_note: Mapped[str | None] = mapped_column(Text); transfer: Mapped[StockTransfer] = relationship(back_populates="items"); product:Mapped[Product]=relationship(); variant:Mapped[ProductVariant|None]=relationship()
+    @property
+    def product_name(self): return self.product.name
+    @property
+    def sku(self): return self.variant.sku if self.variant else self.product.sku
+    @property
+    def barcode(self): return self.variant.barcode if self.variant else self.product.barcode
 
 
 class StockAdjustment(EntityBase):

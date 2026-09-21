@@ -37,6 +37,7 @@ const navigation: NavigationItem[] = [
   { label: 'Analytics', to: 'analytics', icon: BarChart3, roles: ['owner', 'manager'] },
   { label: 'Inward Stock', to: 'receive-stock', icon: PackagePlus, roles: ['owner','manager'], permission: 'inventory.create' },
   { label: 'Barcode Centre', to: 'barcodes', icon: Package, roles: ['owner','manager'], permission: 'products.manage_barcode' },
+  { label: 'Barcode Scanner', to: 'scanner', icon: ScanLine, roles: ['owner','manager'], permission: 'inventory.read' },
   { label: 'Scan to Godown', to: 'godown-intake', icon: ScanLine, roles: ['owner','manager'], permission: 'inventory.create' },
   { label: 'Outward Stock', to: 'outward', icon: PackagePlus, roles: ['owner','manager'], permission: 'inventory.transfer' },
   { label: 'Divert Stock', to: 'divert-stock', icon: ArrowRightLeft, roles: ['owner','manager'], permission: 'inventory.transfer' },

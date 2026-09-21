@@ -7,7 +7,7 @@ from app.models.billing import *
 
 class InvoiceRepository:
     def __init__(self,s:AsyncSession): self.s=s
-    def opts(self): return (selectinload(Invoice.items),selectinload(Invoice.payments).selectinload(Payment.method))
+    def opts(self): return (selectinload(Invoice.items),selectinload(Invoice.payments).selectinload(Payment.method),selectinload(Invoice.customer),selectinload(Invoice.store),selectinload(Invoice.employee))
     async def get(self,id,lock=False):
         q=select(Invoice).options(*self.opts()).where(Invoice.id==id,Invoice.deleted_at.is_(None)); return await self.s.scalar(q.with_for_update() if lock else q)
     async def by_idempotency_key(self,key): return await self.s.scalar(select(Invoice).options(*self.opts()).where(Invoice.idempotency_key==key,Invoice.deleted_at.is_(None)))

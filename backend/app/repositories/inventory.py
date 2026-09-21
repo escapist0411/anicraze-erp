@@ -47,11 +47,11 @@ class InventoryRepository:
         if inventory_id: stmt=stmt.where(InventoryLedger.inventory_id==inventory_id)
         return list((await self.session.scalars(stmt.order_by(InventoryLedger.created_at.desc()).limit(limit))).all())
     async def transfers(self,target_store_id=None):
-        stmt=select(StockTransfer).options(selectinload(StockTransfer.items)).where(StockTransfer.deleted_at.is_(None))
+        stmt=select(StockTransfer).options(selectinload(StockTransfer.items).selectinload(StockTransferItem.product),selectinload(StockTransfer.items).selectinload(StockTransferItem.variant)).where(StockTransfer.deleted_at.is_(None))
         if target_store_id is not None: stmt=stmt.where(StockTransfer.target_store_id==target_store_id)
         return list((await self.session.scalars(stmt.order_by(StockTransfer.created_at.desc()))).unique().all())
     async def transfer(self,id,lock=False):
-        stmt=select(StockTransfer).options(selectinload(StockTransfer.items)).where(StockTransfer.id==id,StockTransfer.deleted_at.is_(None)); return await self.session.scalar(stmt.with_for_update() if lock else stmt)
+        stmt=select(StockTransfer).options(selectinload(StockTransfer.items).selectinload(StockTransferItem.product),selectinload(StockTransfer.items).selectinload(StockTransferItem.variant)).where(StockTransfer.id==id,StockTransfer.deleted_at.is_(None)); return await self.session.scalar(stmt.with_for_update() if lock else stmt)
     async def adjustments(self): return list((await self.session.scalars(select(StockAdjustment).options(selectinload(StockAdjustment.items)).where(StockAdjustment.deleted_at.is_(None)).order_by(StockAdjustment.created_at.desc()))).unique().all())
     async def adjustment(self,id): return await self.session.scalar(select(StockAdjustment).options(selectinload(StockAdjustment.items)).where(StockAdjustment.id==id,StockAdjustment.deleted_at.is_(None)))
     async def reservations(self): return list((await self.session.scalars(select(StockReservation).where(StockReservation.deleted_at.is_(None)).order_by(StockReservation.created_at.desc()))).all())

@@ -3,6 +3,7 @@ from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models.billing import InvoiceStatus, PaymentMethodCode, PaymentStatus, RefundStatus, ReturnStatus
+from app.config.business import BUSINESS_PHONE_DISPLAY
 
 class Strict(BaseModel): model_config=ConfigDict(extra="forbid")
 class CustomerCreate(Strict): name:str=Field(min_length=2,max_length=180); phone:str|None=Field(None,max_length=30); email:str|None=Field(None,max_length=320); address:str|None=None
@@ -20,7 +21,7 @@ class BillingCreate(Strict):
 class InvoiceItemResponse(BaseModel): model_config=ConfigDict(from_attributes=True); id:UUID; inventory_id:UUID; product_id:UUID; variant_id:UUID|None; sku:str; product_name:str; quantity:int; unit_price:Decimal; discount:Decimal; line_total:Decimal
 class PaymentResponse(BaseModel): model_config=ConfigDict(from_attributes=True); id:UUID; invoice_id:UUID; payment_method_id:UUID; amount:Decimal; tendered_amount:Decimal|None; change_amount:Decimal; transaction_reference:str|None; status:PaymentStatus; created_at:datetime
 class InvoiceResponse(BaseModel):
-    model_config=ConfigDict(from_attributes=True); id:UUID; invoice_number:str; customer_id:UUID; store_id:UUID; employee_id:UUID; subtotal:Decimal; discount:Decimal; grand_total:Decimal; payment_status:PaymentStatus; invoice_status:InvoiceStatus; notes:str|None; items:list[InvoiceItemResponse]; payments:list[PaymentResponse]; created_at:datetime
+    model_config=ConfigDict(from_attributes=True); id:UUID; invoice_number:str; customer_id:UUID; store_id:UUID; employee_id:UUID; store_name:str; store_address:str|None; employee_name:str; employee_code:str|None; customer_name:str; customer_address:str|None; payment_methods:list[str]; business_contact:str=BUSINESS_PHONE_DISPLAY; subtotal:Decimal; discount:Decimal; grand_total:Decimal; payment_status:PaymentStatus; invoice_status:InvoiceStatus; notes:str|None; items:list[InvoiceItemResponse]; payments:list[PaymentResponse]; created_at:datetime
 class InvoiceCancelRequest(Strict): reason:str=Field(min_length=3,max_length=255)
 class ReturnItemInput(Strict): invoice_item_id:UUID; quantity:int=Field(gt=0)
 class ReturnCreate(Strict): invoice_id:UUID; reason:str=Field(min_length=2,max_length=255); items:list[ReturnItemInput]=Field(min_length=1); refund_method:PaymentMethodCode; transaction_reference:str|None=None

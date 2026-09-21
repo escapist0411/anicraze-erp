@@ -21,20 +21,22 @@ from app.repositories.management import ManagementRepository
 from app.schemas.billing import *
 from app.services.inventory import InventoryService
 from app.utils.time import utc_now
+from app.config.business import BUSINESS_NAME, BUSINESS_PHONE_DISPLAY
 
 MONEY=Decimal("0.01")
 def money(v): return Decimal(v).quantize(MONEY,rounding=ROUND_HALF_UP)
 
 class InvoicePDFService:
     root=Path(__file__).resolve().parents[2]/"generated"/"invoices"
-    def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User):
+    def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User,payment_methods:list[str]|None=None):
         self.root.mkdir(parents=True,exist_ok=True); path=self.root/f"{invoice.invoice_number}.pdf"; styles=getSampleStyleSheet()
         doc=SimpleDocTemplate(str(path),pagesize=A4,rightMargin=14*mm,leftMargin=14*mm,topMargin=12*mm,bottomMargin=12*mm,title=f"Invoice {invoice.invoice_number}")
         logo=Image(str(Path(__file__).resolve().parents[1]/"assets"/"anicraze-logo.png"),width=50*mm,height=16.67*mm)
-        story=[logo,Paragraph("INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}<br/>Address: {(store.address or 'Address not provided').replace(chr(10), '<br/>')}<br/>Employee: {employee.full_name} ({employee.employee_code or '—'})",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>{customer.address or ''}",styles["BodyText"]),Spacer(1,5*mm)]
+        payment=", ".join(payment_methods or []) or "Recorded"
+        story=[logo,Paragraph("INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}<br/>Address: {(store.address or 'Address not provided').replace(chr(10), '<br/>')}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Employee: {employee.full_name} ({employee.employee_code or '—'})",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>{customer.address or ''}",styles["BodyText"]),Spacer(1,5*mm)]
         rows=[["SKU / Product","Qty","Rate","Discount","Amount"]]+[[f"{x.sku}\n{x.product_name}",str(x.quantity),f"{x.unit_price:.2f}",f"{x.discount:.2f}",f"{x.line_total:.2f}"] for x in invoice.items]
         table=Table(rows,colWidths=[85*mm,15*mm,25*mm,25*mm,28*mm],repeatRows=1); table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#111827")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP"),("ALIGN",(1,1),(-1,-1),"RIGHT")]))
-        story += [table,Spacer(1,5*mm),Table([["Subtotal",f"INR {invoice.subtotal:.2f}"],["Discount",f"INR {invoice.discount:.2f}"],["Grand Total",f"INR {invoice.grand_total:.2f}"]],colWidths=[40*mm,35*mm],hAlign="RIGHT",style=[("GRID",(0,0),(-1,-1),.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),("FONTNAME",(0,-1),(-1,-1),"Helvetica-Bold")]),Spacer(1,7*mm),Paragraph("Terms: Goods once sold may be returned only under the ANICRAZE return policy. This is a computer-generated invoice.",styles["BodyText"]),Spacer(1,4*mm),Paragraph("Thank you for shopping with ANICRAZE.",styles["Heading3"])]
+        story += [table,Spacer(1,5*mm),Table([["Subtotal",f"INR {invoice.subtotal:.2f}"],["Discount",f"INR {invoice.discount:.2f}"],["TOTAL",f"INR {invoice.grand_total:.2f}"],["Payment",payment]],colWidths=[40*mm,35*mm],hAlign="RIGHT",style=[("GRID",(0,0),(-1,-1),.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),("FONTNAME",(0,2),(-1,2),"Helvetica-Bold")]),Spacer(1,7*mm),Paragraph("Terms: Goods once sold may be returned only under the ANICRAZE return policy. This is a computer-generated invoice.",styles["BodyText"]),Spacer(1,4*mm),Paragraph(f"{BUSINESS_NAME}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Thank you for shopping with ANICRAZE!",styles["BodyText"])]
         doc.build(story); return path
 
 class WhatsAppService:
@@ -91,12 +93,13 @@ class BillingService:
             item=InvoiceItem(invoice_id=invoice.id,inventory_id=inv.id,product_id=product.id,variant_id=inv.variant_id,sku=inv.variant.sku if inv.variant else product.sku,product_name=product.name,hsn_code=None,quantity=requested.quantity,unit_price=price,discount=line_discount,gst_rate=0,taxable_amount=base,tax_amount=0,line_total=base); self.s.add(item); created_items.append(item)
             subtotal+=gross; discount+=line_discount
         grand=money(subtotal-discount); invoice.subtotal=money(subtotal); invoice.discount=money(discount); invoice.taxable_amount=grand; invoice.cgst=0; invoice.sgst=0; invoice.igst=0; invoice.gst_total=0; invoice.round_off=0; invoice.grand_total=grand
-        paid=sum((p.amount for p in data.payments),Decimal(0))
+        paid=sum((p.amount for p in data.payments),Decimal(0)); payment_labels=[]
         if paid!=grand: raise ConflictError("Payment total must equal invoice total","BILLING_PAYMENT_TOTAL_MISMATCH")
         if data.invoice_discount: self.s.add(InvoiceDiscount(invoice_id=invoice.id,description="Invoice discount",amount=data.invoice_discount))
         for p in data.payments:
             method=await self.payments.method(p.method)
             if not method: raise ConflictError("Payment method is unavailable","PAYMENT_METHOD_INVALID")
+            payment_labels.append(method.name)
             change=money((p.tendered_amount or p.amount)-p.amount) if p.method==PaymentMethodCode.CASH else Decimal(0)
             payment=Payment(invoice_id=invoice.id,payment_method_id=method.id,amount=money(p.amount),tendered_amount=p.tendered_amount,change_amount=change,transaction_reference=p.transaction_reference,status=PaymentStatus.PAID,created_by_id=self.actor.id,updated_by_id=self.actor.id); self.s.add(payment); await self.s.flush(); invoice.payment_id=invoice.payment_id or payment.id
             if p.method==PaymentMethodCode.CASH:
@@ -108,7 +111,7 @@ class BillingService:
         await self.s.flush(); await self.s.refresh(invoice,attribute_names=["items","payments","created_at"])
         from app.services.crm import CustomerCRMIntegration
         await CustomerCRMIntegration(self.s,self.actor,self.ip,self.user_agent).invoice_completed(invoice)
-        try: invoice.pdf_path=str(InvoicePDFService().generate(invoice,customer,store,self.actor))
+        try: invoice.pdf_path=str(InvoicePDFService().generate(invoice,customer,store,self.actor,payment_labels))
         except Exception: logging.getLogger(__name__).exception("Invoice PDF generation failed for %s",invoice.invoice_number)
         await self.audit("INVOICE_COMPLETED","invoice",invoice.id,{"number":invoice.invoice_number,"total":str(invoice.grand_total),"store_id":str(store.id)}); await self.s.flush(); return await self.invoices.get(invoice.id)
     async def cancel(self,id,reason):

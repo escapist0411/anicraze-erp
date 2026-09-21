@@ -1,0 +1,5 @@
+"""Authoritative customer-facing ANICRAZE business identity."""
+
+BUSINESS_NAME = "ANICRAZE"
+BUSINESS_PHONE_DISPLAY = "+91 80105 26600"
+BUSINESS_PHONE_NORMALIZED = "+918010526600"
