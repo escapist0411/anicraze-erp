@@ -37,6 +37,7 @@ async def barcode(barcode:str,session:DatabaseSession,store_id:UUID,actor:User=D
     return APIResponse(data=BarcodeResult(inventory_id=x.id,product_id=x.product_id,sku=x.variant.sku if x.variant else x.product.sku,barcode=x.variant.barcode if x.variant else x.product.barcode,name=x.product.name,price=x.variant.selling_price if x.variant else x.product.selling_price,available_quantity=x.available_quantity))
 @router.get("/billing/products",response_model=APIResponse[list[BarcodeResult]])
 async def shop_products(session:DatabaseSession,store_id:UUID|None=None,actor:User=Depends(require_permission("billing.read"))):
+    if actor.assigned_store_id is not None and store_id is not None: scoped_store(actor,store_id)
     resolved=actor.assigned_store_id or store_id
     if not resolved: raise AuthorizationError("No shop is assigned to this account","BILLING_STORE_REQUIRED")
     scoped_store(actor,resolved)

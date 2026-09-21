@@ -20,6 +20,9 @@ def test_production_pos_endpoints_are_exposed():
     for path in ("/api/v1/billing","/api/v1/billing/search","/api/v1/billing/barcode/{barcode}","/api/v1/billing/products","/api/v1/invoices","/api/v1/invoices/{id}/pdf"):
         assert path in paths
     assert "/api/v1/billing/customers" not in paths
+def test_shop_products_rejects_conflicting_assigned_store_source():
+    source=__import__('inspect').getsource(__import__('app.api.v1.billing',fromlist=['shop_products']).shop_products)
+    assert "scoped_store(actor,store_id)" in source
 def test_pos_barcode_schema_has_no_cost_or_margin_fields():
     fields=set(__import__('app.schemas.billing',fromlist=['BarcodeResult']).BarcodeResult.model_fields)
     assert not fields.intersection({"purchase_price","average_cost","inventory_value","profit","margin"})

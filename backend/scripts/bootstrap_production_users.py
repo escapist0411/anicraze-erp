@@ -2,13 +2,13 @@
 import asyncio
 import os
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import selectinload
 
 from app.auth.passwords import hash_password
 from app.database.session import AsyncSessionFactory
-from app.models.auth import Role, User, UserStatus
+from app.models.auth import Role, User, UserStatus, user_roles
 from app.models.inventory import EmployeeLocationSequence, Store
 from app.services.password_service import PasswordService
 
@@ -62,14 +62,17 @@ async def bootstrap():
     session.add(user);await session.flush()
    PasswordService().validate_new_password(passwords[password_key],user)
    user.full_name=name;user.password_hash=hash_password(passwords[password_key]);user.token_version+=1
-   user.roles=[roles[role_code]];user.assigned_store_id=store.id if store else None
+   await session.execute(delete(user_roles).where(user_roles.c.user_id==user.id))
+   await session.execute(insert(user_roles).values(user_id=user.id,role_id=roles[role_code].id))
+   user.assigned_store_id=store.id if store else None
    if store and (not user.employee_code or not user.employee_code.startswith(f"EMP-{store.code}-")):
     user.employee_code=await next_employee_code(session,store)
    user.status=UserStatus.ACTIVE;user.is_active=True;user.deleted_at=None;user.must_change_password=False
    created.append((email,role_code,store_code,user.employee_code))
   demos=(await session.scalars(select(User).where(User.email.in_(DEMO_EMAILS)))).all()
   for user in demos:
-   user.status=UserStatus.INACTIVE;user.is_active=False;user.token_version+=1;user.roles=[]
+   user.status=UserStatus.INACTIVE;user.is_active=False;user.token_version+=1
+   await session.execute(delete(user_roles).where(user_roles.c.user_id==user.id))
   await session.commit()
   print(f"Configured {len(created)} final accounts; disabled {len(demos)} demo accounts. Passwords were not logged.")
 
