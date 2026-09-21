@@ -214,7 +214,13 @@ class TransferService(InventoryService):
             transfer_items.append(StockTransferItem(**i.model_dump()))
         values=data.model_dump(exclude={"items","reference_number"}); t=StockTransfer(reference_number=reference or f"PENDING-{uuid4().hex}",items=transfer_items,**values,created_by_id=self.actor.id,updated_by_id=self.actor.id); self.session.add(t); await self.session.flush()
         if not reference: t.reference_number=f"ANI-TRF-{utc_now().year}-{str(t.id).replace('-','')[:8].upper()}"
-        await self.session.flush(); await self.audit("TRANSFER_CREATED","stock_transfer",t.id); return t
+        await self.session.flush(); await self.audit("TRANSFER_CREATED","stock_transfer",t.id)
+        # Response fields such as product_name, SKU and barcode are backed by
+        # product relationships. Reload eagerly so response serialization never
+        # attempts async lazy-loading after this service returns.
+        created = await self.repo.transfer(t.id)
+        if not created: raise NotFoundError("Transfer could not be reloaded", "TRANSFER_NOT_FOUND")
+        return created
     async def _reserve(self,t):
         for item in sorted(t.items,key=lambda x:str(x.product_id)):
             inv=await self.repo.find(item.product_id,item.variant_id,t.source_store_id,t.source_warehouse_id,True)

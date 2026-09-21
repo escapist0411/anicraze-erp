@@ -1,11 +1,12 @@
 from decimal import Decimal
+import inspect
 from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 from app.models.inventory import StockReceiptStatus, TransferStatus
 from app.schemas.inventory import InventoryCreateRequest, StockMovementRequest, StockReceiptCreate, TransferCreateRequest, TransferPickRequest, TransferReceiveRequest
 from app.main import app
-from app.services.inventory import StockReceiptService
+from app.services.inventory import StockReceiptService, TransferService
 from app.exceptions.domain import AuthorizationError, ConflictError
 from types import SimpleNamespace
 import httpx
@@ -51,6 +52,11 @@ def test_multi_product_transfer_and_receipt_contract():
     request=TransferCreateRequest(source_warehouse_id=uuid4(),target_store_id=uuid4(),items=[{"product_id":uuid4(),"quantity":2},{"product_id":uuid4(),"quantity":3}])
     assert len(request.items)==2 and sum(item.quantity for item in request.items)==5
     assert "/api/v1/stock-transfers/{id}/receipt" in {route.path for route in app.routes}
+
+def test_created_transfer_is_eagerly_reloaded_for_response_serialization():
+    source=inspect.getsource(TransferService.create_transfer)
+    assert "created = await self.repo.transfer(t.id)" in source
+    assert "return created" in source
 
 def test_simple_stock_receipt_requires_cost_and_multiple_products():
     request=StockReceiptCreate(warehouse_id=uuid4(),items=[{"product_id":uuid4(),"quantity":10,"unit_cost":"400"},{"product_id":uuid4(),"quantity":8,"unit_cost":"220"}])
