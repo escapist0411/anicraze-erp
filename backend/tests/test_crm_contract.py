@@ -19,8 +19,10 @@ def test_indian_phone_normalization_prevents_country_code_duplicates():
  assert normalize_indian_phone("+91 98765 00001")==normalize_indian_phone("9876500001")=="919876500001"
 def test_phase5_communication_endpoints_are_exposed():
  paths=app.openapi()["paths"]
- for path in ("/api/v1/customer-communications","/api/v1/customers/{id}/communications","/api/v1/invoices/{id}/communications","/api/v1/communications/whatsapp/send","/api/v1/communications/{id}/retry"):
+ for path in ("/api/v1/invoices/{id}/communications","/api/v1/communications/whatsapp/send","/api/v1/communications/{id}/retry"):
   assert path in paths
+ assert "/api/v1/customers" not in paths
+ assert "/api/v1/crm/dashboard" not in paths
 @pytest.mark.asyncio
 async def test_development_provider_is_honestly_simulated(tmp_path):
  pdf=tmp_path/"invoice.pdf";pdf.write_bytes(b"%PDF-test")

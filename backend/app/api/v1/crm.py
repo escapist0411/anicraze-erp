@@ -175,3 +175,10 @@ async def refund_receipt(id:UUID,session:DatabaseSession,actor:User=Depends(requ
 async def dashboard(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("crm.analytics"))): return APIResponse(data=await svc(CRMAnalyticsService,session,actor,request).dashboard())
 @router.get("/crm/analytics/{report}",response_model=APIResponse[dict])
 async def analytics(report:str,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("crm.analytics"))): data=await svc(CRMAnalyticsService,session,actor,request).dashboard();return APIResponse(data={"report":report,**data})
+
+# Historical CRM models remain for invoice compatibility, but only operational
+# invoice delivery and return/refund endpoints are part of the active API.
+operational_router=APIRouter()
+for route in router.routes:
+    if route.path.startswith(("/communications/", "/invoices/", "/sales-returns", "/customer-refunds")):
+        operational_router.routes.append(route)
