@@ -37,6 +37,7 @@ htmlcov/
 *.sqlite
 *.sqlite3
 *.dump
+backend/.production-users.env
 
 # Secrets and private keys
 *.pem
