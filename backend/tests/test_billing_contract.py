@@ -23,5 +23,9 @@ def test_production_pos_endpoints_are_exposed():
 def test_pos_barcode_schema_has_no_cost_or_margin_fields():
     fields=set(__import__('app.schemas.billing',fromlist=['BarcodeResult']).BarcodeResult.model_fields)
     assert not fields.intersection({"purchase_price","average_cost","inventory_value","profit","margin"})
+def test_canonical_pos_payment_codes_are_shared():
+    assert {PaymentMethodCode.CASH,PaymentMethodCode.UPI,PaymentMethodCode.CARD,PaymentMethodCode.OTHER} == {
+        PaymentMethodCode(value) for value in ("CASH","UPI","CARD","OTHER")
+    }
 def test_return_requires_items():
     with pytest.raises(ValidationError): ReturnCreate(invoice_id=uuid4(),reason="bad",items=[],refund_method=PaymentMethodCode.CASH)

@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.models.billing import *
@@ -22,7 +23,15 @@ class InvoiceRepository:
 class PaymentRepository:
     def __init__(self,s): self.s=s
     async def list(self): return list((await self.s.scalars(select(Payment).order_by(Payment.created_at.desc()).limit(500))).all())
-    async def method(self,code): return await self.s.scalar(select(PaymentMethod).where(PaymentMethod.code==code,PaymentMethod.is_active.is_(True),PaymentMethod.deleted_at.is_(None)))
+    async def method(self,code):
+        """Resolve an intrinsic POS method without external provider configuration."""
+        name={PaymentMethodCode.CASH:"Cash",PaymentMethodCode.UPI:"UPI",PaymentMethodCode.CARD:"Card",PaymentMethodCode.OTHER:"Other"}.get(code,code.value.replace("_"," ").title())
+        method_id=await self.s.scalar(
+            insert(PaymentMethod).values(code=code,name=name,is_active=True)
+            .on_conflict_do_update(index_elements=[PaymentMethod.code],set_={"name":name,"is_active":True,"deleted_at":None})
+            .returning(PaymentMethod.id)
+        )
+        return await self.s.get(PaymentMethod,method_id)
 class ReturnRepository:
     def __init__(self,s): self.s=s
     async def list(self): return list((await self.s.scalars(select(Return).options(selectinload(Return.items)).where(Return.deleted_at.is_(None)).order_by(Return.created_at.desc()))).unique().all())
