@@ -49,6 +49,9 @@ class TransferCreateRequest(StrictModel):
         if self.source_store_id==self.target_store_id and self.source_store_id is not None: raise ValueError("Source and target must differ")
         if self.source_warehouse_id==self.target_warehouse_id and self.source_warehouse_id is not None: raise ValueError("Source and target must differ")
         return self
+class DirectTransferRequest(TransferCreateRequest):
+    reference_number: None = None
+    idempotency_key: UUID
 class TransferStatusRequest(StrictModel): status:TransferStatus; reason:str|None=Field(None,max_length=500)
 class TransferPickItemRequest(StrictModel): item_id:UUID; picked_quantity:int=Field(ge=0)
 class TransferPickRequest(StrictModel): items:list[TransferPickItemRequest]=Field(min_length=1)

@@ -18,6 +18,7 @@ export const inventoryService={
  markDamaged:async(id:string,payload:unknown)=>(await api.post(`/inventory/${id}/damage`,payload)).data.data,
  adjust:async(payload:unknown)=>(await api.post('/stock-adjustments',payload)).data.data,
  transfer:async(payload:unknown)=>(await api.post('/stock-transfers',payload)).data.data,
+ directTransfer:async(payload:unknown)=>(await api.post('/stock-transfers/direct',payload)).data.data,
  transferReceipt:(id:string)=>downloadFile(`/stock-transfers/${id}/receipt`),
  generateBarcode:async(productId:string,regenerate=false,format='CODE128')=>{const result=(await api.post<{data:BarcodeResult}>(`/products/${productId}/barcode`,{regenerate,format})).data.data;if(result.image_url&&api.defaults.baseURL)result.image_url=new URL(result.image_url,new URL(api.defaults.baseURL).origin).toString();return result},
  receipts:()=>getData<StockReceipt[]>('/stock-receipts'),

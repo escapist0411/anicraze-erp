@@ -11,6 +11,7 @@ from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundErr
 from app.models.auth import AuditLog, User
 from app.models.catalog import Product, ProductVariant
 from app.models.inventory import *
+from app.models.notifications import Notification, NotificationCategory, NotificationSeverity
 from app.repositories.inventory import InventoryRepository
 from app.repositories.management import ManagementRepository
 from app.schemas.inventory import *
@@ -202,6 +203,108 @@ class StockReceiptService(InventoryService):
 
 
 class TransferService(InventoryService):
+    def authorize_direct_transfer(self):
+        roles = {role.code for role in self.actor.roles}
+        if not roles.intersection({"OWNER", "MANAGER", "ADMIN"}):
+            raise AuthorizationError("Only an Owner or Manager can transfer stock", "TRANSFER_ROLE_DENIED")
+
+    async def direct_transfer(self, data: DirectTransferRequest):
+        self.authorize_direct_transfer()
+        reference = f"ANI-TRF-{utc_now().year}-{data.idempotency_key.hex.upper()}"
+        await self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(f"direct-transfer:{data.idempotency_key}", 0))))
+        existing = await self.session.scalar(select(StockTransfer).where(StockTransfer.reference_number == reference))
+        if existing:
+            if existing.created_by_id != self.actor.id or existing.status != TransferStatus.COMPLETED:
+                raise ConflictError("Transfer request already exists", "TRANSFER_IDEMPOTENCY_CONFLICT")
+            loaded = await self.repo.transfer(existing.id)
+            if not loaded: raise NotFoundError("Transfer not found", "TRANSFER_NOT_FOUND")
+            return loaded
+
+        source = target = None
+        for model, location_id, side in (
+            (Store, data.source_store_id, "source"), (Warehouse, data.source_warehouse_id, "source"),
+            (Store, data.target_store_id, "target"), (Warehouse, data.target_warehouse_id, "target"),
+        ):
+            if location_id:
+                location = await self.location(model, location_id)
+                if side == "source": source = location
+                else: target = location
+        keys = [(item.product_id, item.variant_id) for item in data.items]
+        if len(keys) != len(set(keys)):
+            raise ConflictError("Combine duplicate products before transferring stock", "TRANSFER_DUPLICATE_PRODUCT")
+
+        # Transaction-scoped advisory locks cover both existing and not-yet-created
+        # destination rows. Sorting gives concurrent multi-product requests a stable
+        # lock order and prevents deadlocks/overselling.
+        lock_keys = []
+        for item in data.items:
+            for store_id, warehouse_id in (
+                (data.source_store_id, data.source_warehouse_id),
+                (data.target_store_id, data.target_warehouse_id),
+            ):
+                lock_keys.append(f"inventory:{item.product_id}:{item.variant_id}:{store_id}:{warehouse_id}")
+        for lock_key in sorted(set(lock_keys)):
+            await self.session.execute(select(func.pg_advisory_xact_lock(func.hashtextextended(lock_key, 0))))
+
+        movements = []
+        for item in sorted(data.items, key=lambda value: (str(value.product_id), str(value.variant_id))):
+            source_inventory = await self.repo.find(item.product_id, item.variant_id, data.source_store_id, data.source_warehouse_id, True)
+            if not source_inventory or source_inventory.available_quantity < item.quantity:
+                raise ConflictError("Insufficient stock.", "TRANSFER_INSUFFICIENT_STOCK")
+            destination_inventory = await self.repo.find(item.product_id, item.variant_id, data.target_store_id, data.target_warehouse_id, True)
+            movements.append((item, source_inventory, destination_inventory))
+
+        now = utc_now()
+        transfer_items = [StockTransferItem(**item.model_dump(), picked_quantity=item.quantity, received_quantity=item.quantity) for item in data.items]
+        transfer = StockTransfer(
+            reference_number=reference, source_store_id=data.source_store_id, source_warehouse_id=data.source_warehouse_id,
+            target_store_id=data.target_store_id, target_warehouse_id=data.target_warehouse_id, status=TransferStatus.COMPLETED,
+            remarks=data.remarks, items=transfer_items, received_by_id=self.actor.id, received_at=now, completed_at=now,
+            created_by_id=self.actor.id, updated_by_id=self.actor.id,
+        )
+        self.session.add(transfer); await self.session.flush()
+        item_models = {(item.product_id, item.variant_id): item for item in transfer.items}
+        for request_item, source_inventory, destination_inventory in movements:
+            if not destination_inventory:
+                destination_inventory = await self.create(InventoryCreateRequest(
+                    product_id=request_item.product_id, variant_id=request_item.variant_id,
+                    store_id=data.target_store_id, warehouse_id=data.target_warehouse_id,
+                    minimum_stock=source_inventory.minimum_stock, reorder_level=source_inventory.reorder_level,
+                    average_cost=source_inventory.average_cost,
+                ))
+            item_model = item_models[(request_item.product_id, request_item.variant_id)]
+            await self.move(source_inventory, TransactionType.TRANSFER_OUT, -request_item.quantity, reference,
+                            f"direct-transfer:{transfer.id}:out:{item_model.id}", source_inventory.average_cost,
+                            request_item.batch_number, "Direct stock transfer")
+            destination_units = destination_inventory.available_quantity + destination_inventory.reserved_quantity
+            destination_inventory.average_cost = (
+                (Decimal(destination_units) * destination_inventory.average_cost + Decimal(request_item.quantity) * source_inventory.average_cost)
+                / Decimal(destination_units + request_item.quantity)
+            )
+            await self.move(destination_inventory, TransactionType.TRANSFER_IN, request_item.quantity, reference,
+                            f"direct-transfer:{transfer.id}:in:{item_model.id}", source_inventory.average_cost,
+                            request_item.batch_number, "Direct stock transfer")
+
+        if data.target_store_id:
+            recipients = list((await self.session.scalars(select(User.id).where(
+                User.assigned_store_id == data.target_store_id, User.is_active.is_(True), User.deleted_at.is_(None)
+            ))).all())
+            for user_id in recipients:
+                self.session.add(Notification(
+                    user_id=user_id, category=NotificationCategory.TRANSFER, severity=NotificationSeverity.INFO,
+                    title="Stock Received", message=f"{len(data.items)} products / {sum(item.quantity for item in data.items)} units were transferred from {source.name}.",
+                    entity_type="stock_transfer", entity_id=transfer.id, action_path="/notifications",
+                    dedupe_key=f"direct-transfer:{transfer.id}:received",
+                ))
+        await self.audit("TRANSFER_COMPLETED", "stock_transfer", transfer.id, {
+            "reference": reference, "source": source.name, "destination": target.name,
+            "products": len(data.items), "units": sum(item.quantity for item in data.items), "direct": True,
+        })
+        await self.session.flush()
+        completed = await self.repo.transfer(transfer.id)
+        if not completed: raise NotFoundError("Transfer could not be reloaded", "TRANSFER_NOT_FOUND")
+        return completed
+
     async def create_transfer(self,data):
         reference=data.reference_number
         if reference and await self.session.scalar(select(StockTransfer).where(StockTransfer.reference_number==reference)): raise ConflictError("Transfer reference exists","TRANSFER_EXISTS")

@@ -127,6 +127,8 @@ async def returned(id:UUID,data:StockMovementRequest,request:Request,session:Dat
 async def transfers(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(TransferService,session,actor,request).repo.transfers(actor.assigned_store_id))
 @router.post("/stock-transfers",response_model=APIResponse[TransferResponse],status_code=201)
 async def create_transfer(data:TransferCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.transfer"))): return APIResponse(data=await service(TransferService,session,actor,request).create_transfer(data))
+@router.post("/stock-transfers/direct",response_model=APIResponse[TransferResponse],status_code=201)
+async def direct_transfer(data:DirectTransferRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.transfer"))): return APIResponse(data=await service(TransferService,session,actor,request).direct_transfer(data))
 @router.get("/stock-transfers/{id}",response_model=APIResponse[TransferResponse])
 async def get_transfer(id:UUID,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))):
     s=service(TransferService,session,actor,request); item=await s.repo.transfer(id)
