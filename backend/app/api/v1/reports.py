@@ -78,9 +78,9 @@ async def export_impl(data:ReportExportRequest,session,actor):
  domain=(data.report_type.split("_",1)[0] or "sales");ensure_permission(actor,f"reports.{domain}.export");report=data.report_type[len(domain)+1:] or "summary";svc=ReportingService(session,actor);payload=await svc.report(domain,report,data.filters);raw,mime,name=file_response(data.report_type,data.format,payload);h=ReportExportHistory(report_type=data.report_type,format=data.format,filters_json=data.filters.model_dump(mode="json"),file_path=None,file_url=None,status=ExportStatus.COMPLETED,generated_by=actor.id,generated_at=utc_now(),expires_at=utc_now()+timedelta(days=7),error_message=None,file_size=len(raw),created_by_id=actor.id,updated_by_id=actor.id);session.add(h);await svc.audit("REPORT_EXPORTED",data.report_type,{"format":data.format.value});await session.flush();return StreamingResponse(io.BytesIO(raw),media_type=mime,headers={"Content-Disposition":f'attachment; filename="{name}"',"X-Export-History-Id":str(h.id)})
 
 @reports_router.post("/export")
-async def export_post(data:ReportExportRequest,session:DatabaseSession,actor:User=Depends(require_any_permission("reports.sales.export","reports.inventory.export","reports.finance.export","reports.gst.export"))):return await export_impl(data,session,actor)
+async def export_post(data:ReportExportRequest,session:DatabaseSession,actor:User=Depends(require_any_permission("reports.sales.export","reports.inventory.export","reports.finance.export"))):return await export_impl(data,session,actor)
 @reports_router.get("/export")
-async def export_get(session:DatabaseSession,report_type:str,format:ReportFormat,date_from:date|None=None,date_to:date|None=None,store_id:UUID|None=None,actor:User=Depends(require_any_permission("reports.sales.export","reports.inventory.export","reports.finance.export","reports.gst.export"))):return await export_impl(ReportExportRequest(report_type=report_type,format=format,filters=filters(date_from,date_to,store_id=store_id)),session,actor)
+async def export_get(session:DatabaseSession,report_type:str,format:ReportFormat,date_from:date|None=None,date_to:date|None=None,store_id:UUID|None=None,actor:User=Depends(require_any_permission("reports.sales.export","reports.inventory.export","reports.finance.export"))):return await export_impl(ReportExportRequest(report_type=report_type,format=format,filters=filters(date_from,date_to,store_id=store_id)),session,actor)
 
 @reports_router.get("/targets",response_model=APIResponse[list[dict]])
 async def targets(session:DatabaseSession,actor:User=Depends(require_permission("reports.targets.read"))):
@@ -107,10 +107,10 @@ async def generic_report(domain:str,report:str,session:DatabaseSession,actor:Use
 @expenses_router.get("",response_model=APIResponse[list[dict]])
 async def list_expenses(session:DatabaseSession,actor:User=Depends(require_permission("expenses.read")),store_id:UUID|None=None):
  sid=scoped_store(actor,store_id);q=select(Expense).where(Expense.deleted_at.is_(None));q=q.where(Expense.store_id==sid) if sid else q;rows=list((await session.scalars(q.order_by(Expense.expense_date.desc()))).all());return APIResponse(data=[expense_dict(x) for x in rows])
-def expense_dict(x):return {"id":x.id,"expense_number":x.expense_number,"expense_date":x.expense_date,"category":x.category,"description":x.description,"amount":x.amount,"gst_amount":x.gst_amount,"store_id":x.store_id,"status":x.status,"approved_at":x.approved_at}
+def expense_dict(x):return {"id":x.id,"expense_number":x.expense_number,"expense_date":x.expense_date,"category":x.category,"description":x.description,"amount":x.amount,"store_id":x.store_id,"status":x.status,"approved_at":x.approved_at}
 @expenses_router.post("",response_model=APIResponse[dict],status_code=201)
 async def create_expense(data:ExpenseCreateRequest,session:DatabaseSession,actor:User=Depends(require_permission("expenses.create"))):
- sid=scoped_store(actor,data.store_id);n=(await session.scalar(select(func.count(Expense.id))))+1;x=Expense(**data.model_dump(exclude={"store_id"}),store_id=sid,expense_number=f"EXP-{datetime.now().year}-{n:06d}",status=ExpenseStatus.DRAFT,created_by_id=actor.id,updated_by_id=actor.id);session.add(x);await session.flush();return APIResponse(data=expense_dict(x))
+ sid=scoped_store(actor,data.store_id);n=(await session.scalar(select(func.count(Expense.id))))+1;x=Expense(**data.model_dump(exclude={"store_id"}),gst_amount=0,store_id=sid,expense_number=f"EXP-{datetime.now().year}-{n:06d}",status=ExpenseStatus.DRAFT,created_by_id=actor.id,updated_by_id=actor.id);session.add(x);await session.flush();return APIResponse(data=expense_dict(x))
 @expenses_router.patch("/{id}",response_model=APIResponse[dict])
 async def update_expense(id:UUID,data:ExpenseUpdateRequest,session:DatabaseSession,actor:User=Depends(require_permission("expenses.update"))):
  x=await session.get(Expense,id)

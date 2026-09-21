@@ -9,7 +9,6 @@ const reports = [
   { value: 'sales:summary', label: 'Sales summary' },
   { value: 'inventory:summary', label: 'Inventory summary' },
   { value: 'finance:summary', label: 'Finance summary' },
-  { value: 'gst:summary', label: 'GST summary' },
 ];
 
 function Values({ data }: { data: Record<string, unknown> }) {

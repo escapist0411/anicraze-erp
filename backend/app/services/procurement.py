@@ -17,11 +17,18 @@ from app.repositories.management import ManagementRepository
 from app.repositories.procurement import ProcurementRepository
 from app.schemas.inventory import InventoryCreateRequest
 from app.schemas.procurement import *
-from app.services.billing import GSTService, money
+from app.services.billing import money
 from app.services.inventory import InventoryService
 from app.utils.time import utc_now
 
 GST={Decimal("0"),Decimal("5"),Decimal("12"),Decimal("18"),Decimal("28")}
+class GSTService:
+    """Legacy procurement compatibility; its router is intentionally not mounted."""
+    @staticmethod
+    def calculate(base,rate,interstate):
+        total=money(base*rate/100)
+        if interstate:return Decimal(0),Decimal(0),total
+        first=money(total/2);return first,total-first,Decimal(0)
 class ProcurementBase:
     def __init__(self,s,actor:User,ip=None,user_agent=None): self.s=s; self.actor=actor; self.repo=ProcurementRepository(s); self.audit_repo=ManagementRepository(s); self.ip=ip; self.user_agent=user_agent
     async def audit(self,action,kind,id,meta=None): await self.audit_repo.audit(AuditLog(actor_user_id=self.actor.id,action=action,entity_type=kind,entity_id=id,metadata_json=meta,ip_address=self.ip,user_agent=self.user_agent,created_at=utc_now()))

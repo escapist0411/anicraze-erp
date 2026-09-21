@@ -1,3 +1,0 @@
-import { UserPlus } from 'lucide-react';
-import { CustomerTable } from '@/components/billing/BillingPanels';
-export default function Customers() { return <div className="mx-auto max-w-[1680px] space-y-6"><section className="flex items-end justify-between"><div><p className="text-sm text-muted-foreground">Buyer relationships</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Customers</h2><p className="mt-2 text-sm text-muted-foreground">Manage contact details, GST information, memberships, and lifetime value.</p></div><button className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground"><UserPlus className="size-4" />Add customer</button></section><CustomerTable /></div>; }

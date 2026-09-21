@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.models.catalog import CatalogStatus, ProductStatus, ProductType
 
 MONEY = Decimal
-APPROVED_GST_RATES = {Decimal("0"), Decimal("5"), Decimal("12"), Decimal("18"), Decimal("28")}
 
 
 class StrictModel(BaseModel):
@@ -22,14 +21,12 @@ class ProductPricingMixin(StrictModel):
     mrp: Decimal | None = Field(None, ge=0, max_digits=14, decimal_places=2)
     minimum_selling_price: Decimal | None = Field(None, ge=0, max_digits=14, decimal_places=2)
     discount_percentage: Decimal = Field(default=Decimal("0"), ge=0, le=100)
-    gst_rate: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
     @model_validator(mode="after")
     def validate_pricing(self):
         if self.landed_cost is not None and self.landed_cost < self.purchase_price: raise ValueError("landed_cost cannot be below purchase_price")
         if self.mrp is not None and self.mrp < self.selling_price: raise ValueError("mrp cannot be below selling_price")
         if self.minimum_selling_price is not None and self.minimum_selling_price > self.selling_price: raise ValueError("minimum_selling_price cannot exceed selling_price")
-        if self.gst_rate not in APPROVED_GST_RATES: raise ValueError("gst_rate is not an approved configured rate")
         return self
 
 
@@ -64,7 +61,6 @@ class ProductCreateRequest(ProductPricingMixin):
     manufacturer: str | None = Field(None, max_length=160)
     country_of_origin: str | None = Field(None, max_length=100)
     import_reference: str | None = Field(None, max_length=120)
-    hsn_code: str | None = Field(None, pattern=r"^\d{4,8}$")
     reorder_level: int = Field(default=0, ge=0)
     unit_of_measure: str = Field(default="piece", min_length=1, max_length=30)
     weight: Decimal | None = Field(None, ge=0)
@@ -96,8 +92,7 @@ class ProductUpdateRequest(StrictModel):
     category_id: UUID | None = None; brand_id: UUID | None = None; anime_id: UUID | None = None; character_id: UUID | None = None
     product_type: ProductType | None = None; short_description: str | None = None; description: str | None = None
     material: str | None = None; edition: str | None = None; manufacturer: str | None = None; country_of_origin: str | None = None; import_reference: str | None = None
-    hsn_code: str | None = Field(None, pattern=r"^\d{4,8}$")
-    gst_rate: Decimal | None = Field(None, ge=0, le=100); purchase_price: Decimal | None = Field(None, ge=0); landed_cost: Decimal | None = Field(None, ge=0); selling_price: Decimal | None = Field(None, ge=0); mrp: Decimal | None = Field(None, ge=0); discount_percentage: Decimal | None = Field(None, ge=0, le=100); minimum_selling_price: Decimal | None = Field(None, ge=0)
+    purchase_price: Decimal | None = Field(None, ge=0); landed_cost: Decimal | None = Field(None, ge=0); selling_price: Decimal | None = Field(None, ge=0); mrp: Decimal | None = Field(None, ge=0); discount_percentage: Decimal | None = Field(None, ge=0, le=100); minimum_selling_price: Decimal | None = Field(None, ge=0)
     reorder_level: int | None = Field(None, ge=0); unit_of_measure: str | None = None; weight: Decimal | None = Field(None, ge=0); length: Decimal | None = Field(None, ge=0); width: Decimal | None = Field(None, ge=0); height: Decimal | None = Field(None, ge=0)
     is_serialized: bool | None = None; has_variants: bool | None = None; status: ProductStatus | None = None; is_featured: bool | None = None
 
@@ -149,7 +144,7 @@ class ProductResponse(BaseModel):
     id: UUID; sku: str; barcode: str | None; name: str; slug: str; short_description: str | None; description: str | None
     category: NamedReference; brand: NamedReference | None; anime: NamedReference | None; character: NamedReference | None
     product_type: ProductType; material: str | None; edition: str | None; manufacturer: str | None; country_of_origin: str | None; import_reference: str | None
-    hsn_code: str | None; gst_rate: Decimal; purchase_price: Decimal; landed_cost: Decimal | None; selling_price: Decimal; mrp: Decimal | None; discount_percentage: Decimal; minimum_selling_price: Decimal | None
+    purchase_price: Decimal; landed_cost: Decimal | None; selling_price: Decimal; mrp: Decimal | None; discount_percentage: Decimal; minimum_selling_price: Decimal | None
     reorder_level: int; unit_of_measure: str; weight: Decimal | None; length: Decimal | None; width: Decimal | None; height: Decimal | None
     is_serialized: bool; has_variants: bool; status: ProductStatus; is_featured: bool; primary_image: str | None; images: list[ProductImageResponse] = []; variants: list[ProductVariantResponse] = []
     created_by_id: UUID | None; updated_by_id: UUID | None; created_at: datetime; updated_at: datetime

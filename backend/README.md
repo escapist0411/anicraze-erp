@@ -33,7 +33,7 @@ The seed is idempotent. Credentials below are development-only:
 - OWNER: `*`
 - ADMIN: every seeded permission except `*`
 - MANAGER: dashboard, product/inventory operations, billing/report/employee/store read
-- ACCOUNTANT: finance, billing/report exports, GST and expenses
+- ACCOUNTANT: finance, billing/report exports and expenses
 - INVENTORY: product maintenance, inventory, purchasing and suppliers
 - SALES: products/inventory read, billing and customers
 - HR: employees, attendance, leave and payroll read
@@ -110,10 +110,10 @@ ADMIN receives full catalog management. MANAGER can read/create/update products 
 
 ### CSV import
 
-Send a UTF-8 CSV (maximum 5 MB) with headers matching product create fields. Required columns are `name`, `category_id`, and `product_type`; pricing/GST fields accept decimal strings. Use `dry_run=true` for validation. Invalid non-partial batches do not commit.
+Send a UTF-8 CSV (maximum 5 MB) with headers matching product create fields. Required columns are `name`, `category_id`, and `product_type`; pricing fields accept decimal strings. Use `dry_run=true` for validation. Invalid non-partial batches do not commit.
 
 ```csv
-name,sku,category_id,product_type,purchase_price,landed_cost,selling_price,mrp,gst_rate,status
+name,sku,category_id,product_type,purchase_price,landed_cost,selling_price,mrp,status
 Gojo Figure,,CATEGORY_UUID,FIGURE,1200,1450,2499,2999,18,ACTIVE
 ```
 
@@ -124,7 +124,7 @@ Gojo Figure,,CATEGORY_UUID,FIGURE,1200,1450,2499,2999,18,ACTIVE
 curl -X POST http://127.0.0.1:8000/api/v1/categories -H 'Authorization: Bearer TOKEN' -H 'Content-Type: application/json' -d '{"name":"Figures","code":"FIG"}'
 
 # Create product (SKU generated)
-curl -X POST http://127.0.0.1:8000/api/v1/products -H 'Authorization: Bearer TOKEN' -H 'Content-Type: application/json' -d '{"name":"Gojo Figure","category_id":"UUID","product_type":"FIGURE","gst_rate":"18","purchase_price":"1200","landed_cost":"1450","selling_price":"2499","mrp":"2999","status":"ACTIVE"}'
+curl -X POST http://127.0.0.1:8000/api/v1/products -H 'Authorization: Bearer TOKEN' -H 'Content-Type: application/json' -d '{"name":"Gojo Figure","category_id":"UUID","product_type":"FIGURE","purchase_price":"1200","landed_cost":"1450","selling_price":"2499","mrp":"2999","status":"ACTIVE"}'
 
 curl 'http://127.0.0.1:8000/api/v1/products?search=gojo&status=ACTIVE' -H 'Authorization: Bearer TOKEN'
 curl http://127.0.0.1:8000/api/v1/products/search/barcode/BARCODE -H 'Authorization: Bearer TOKEN'
@@ -142,11 +142,11 @@ Phase 14 adds canonical store/warehouse inventory, append-only movement transact
 
 # Billing and POS architecture
 
-Phase 15 adds an atomic POS workflow spanning customers, invoices, GST snapshots, discounts, payments, returns, refunds, cash registers and inventory ledger movements. `POST /api/v1/billing` locks inventory in deterministic order, validates active products and prices, calculates 0/5/12/18/28% GST, persists payments, completes the invoice, deducts stock and writes audit/ledger records in one database transaction. Any exception rolls the transaction back.
+The POS workflow atomically handles customers, invoices, discounts, payments, returns, refunds, cash registers and inventory-ledger movements. `POST /api/v1/billing` locks inventory, validates products and authoritative prices, applies discounts, persists payment, completes the invoice and deducts stock in one transaction.
 
-Intrastate Maharashtra sales split tax equally into CGST and SGST; other state codes use IGST. Invoice and item values are immutable monetary snapshots. Split tender is represented by multiple payment entries. Cash change uses `tendered_amount`, while electronic payments require a reference.
+Invoice and item values are immutable monetary snapshots. Split tender is represented by multiple payment entries. Cash change uses `tendered_amount`, while electronic payments require a reference.
 
-Returns use `POST /api/v1/returns`, enforce cumulative quantities against the source invoice, restore inventory through the same ledger engine and create a linked refund. ReportLab was selected for deterministic, dependency-light server-side GST PDFs; download them from `GET /api/v1/invoices/{id}/pdf`.
+Returns use `POST /api/v1/returns`, enforce cumulative quantities against the source invoice, restore inventory through the ledger and refund the actual amount attributable to the sold line. Download branded PDFs from `GET /api/v1/invoices/{id}/pdf`.
 
 Swagger examples and all POS, barcode, invoice, payment, return, refund, analytics and report contracts are available at `/api/v1/docs`. Seed demo billing data with `python -m app.scripts.seed_billing` after migrations and the catalog/inventory seeds. Notification abstractions (`WhatsAppService`, `SMSService`, `EmailService`) log safely in development and expose provider-neutral methods for later integrations.
 
@@ -154,7 +154,7 @@ Swagger examples and all POS, barcode, invoice, payment, return, refund, analyti
 
 Phase 16 implements `Purchase Request → Approval → Purchase Order → Supplier Confirmation → GRN → Inventory → Supplier Invoice → Payment → Purchase Return`. Services own state transitions and calculations; repositories own async persistence. Request-scoped transactions make receiving, stock ledger changes, balances, payments and reversals atomic. Document numbers use locked `procurement_sequences` rows.
 
-PO totals, discounts, GST and landed charges are calculated by the backend. The PO state machine is `DRAFT → SUBMITTED → APPROVED → SENT → CONFIRMED → PARTIALLY_RECEIVED/RECEIVED → CLOSED`. GRN completion locks the PO, prevents over-receipt, sends accepted and damaged quantities through the inventory ledger and updates weighted costs. Approved supplier invoices increase accounts payable; payments and reversals update invoice and supplier balances together. Purchase returns use compensating stock transactions. Supplier list responses omit bank account details. Supplier performance weights are delivery 45%, quality 35%, and rating 20%.
+Legacy procurement totals, discounts and landed charges are calculated by the backend. The PO state machine is `DRAFT → SUBMITTED → APPROVED → SENT → CONFIRMED → PARTIALLY_RECEIVED/RECEIVED → CLOSED`. GRN completion locks the PO, prevents over-receipt, sends accepted and damaged quantities through the inventory ledger and updates weighted costs. Approved supplier invoices increase accounts payable; payments and reversals update invoice and supplier balances together. Purchase returns use compensating stock transactions. Supplier list responses omit bank account details. Supplier performance weights are delivery 45%, quality 35%, and rating 20%.
 
 ```bash
 alembic upgrade head
@@ -176,9 +176,9 @@ curl -X POST 'http://localhost:8000/api/v1/purchase-requests/REQUEST_UUID/conver
 curl -X POST http://localhost:8000/api/v1/purchase-orders/PO_UUID/approve -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
 curl -X POST http://localhost:8000/api/v1/grns -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"purchase_order_id":"PO_UUID","items":[{"purchase_order_item_id":"PO_ITEM_UUID","received_quantity":5,"accepted_quantity":4,"damaged_quantity":1}]}'
 curl -X POST http://localhost:8000/api/v1/grns/GRN_UUID/complete -H "Authorization: Bearer $TOKEN"
-curl -X POST http://localhost:8000/api/v1/supplier-invoices -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"supplier_invoice_number":"SUP-001","supplier_id":"SUPPLIER_UUID","invoice_date":"2026-08-06","due_date":"2026-09-05","items":[{"product_id":"PRODUCT_UUID","quantity":5,"unit_cost":500,"gst_rate":18}]}'
+curl -X POST http://localhost:8000/api/v1/supplier-invoices -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"supplier_invoice_number":"SUP-001","supplier_id":"SUPPLIER_UUID","invoice_date":"2026-08-06","due_date":"2026-09-05","items":[{"product_id":"PRODUCT_UUID","quantity":5,"unit_cost":500}]}'
 curl -X POST http://localhost:8000/api/v1/supplier-payments -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"supplier_id":"SUPPLIER_UUID","supplier_invoice_id":"INVOICE_UUID","payment_method":"BANK_TRANSFER","amount":1000,"reference_number":"NEFT-001"}'
-curl -X POST http://localhost:8000/api/v1/purchase-returns -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"supplier_id":"SUPPLIER_UUID","source_warehouse_id":"WAREHOUSE_UUID","reason":"Quality issue","items":[{"inventory_id":"INVENTORY_UUID","quantity":1,"unit_cost":500,"gst_rate":18,"condition":"DAMAGED","reason":"Transit damage"}]}'
+curl -X POST http://localhost:8000/api/v1/purchase-returns -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"supplier_id":"SUPPLIER_UUID","source_warehouse_id":"WAREHOUSE_UUID","reason":"Quality issue","items":[{"inventory_id":"INVENTORY_UUID","quantity":1,"unit_cost":500,"condition":"DAMAGED","reason":"Transit damage"}]}'
 ```
 
 Swagger at `/api/v1/docs` documents the endpoint contracts. Common errors include `*_STATUS_INVALID`, `GRN_OVER_RECEIPT`, `SUPPLIER_PAYMENT_OVERPAYMENT`, `PROCUREMENT_PRODUCT_INVALID`, and `AUTH_PERMISSION_DENIED`.
@@ -241,9 +241,9 @@ curl -X POST http://localhost:8000/api/v1/performance/reviews -H "Authorization:
 Common errors include `EMPLOYEE_DUPLICATE`, `EMPLOYEE_USER_ALREADY_LINKED`, `ATTENDANCE_DUPLICATE_CHECKIN`, `ATTENDANCE_CHECKIN_REQUIRED`, `SHIFT_ASSIGNMENT_OVERLAP`, `LEAVE_OVERLAP`, `LEAVE_BALANCE_INSUFFICIENT`, `PAYROLL_RUN_EXISTS`, and `PAYROLL_STATUS_INVALID`.
 # Phase 19 — Reports, BI, Finance and Exports
 
-The reporting layer aggregates live operational records and exposes owner KPIs, sales, inventory, finance, GST, purchase, customer, employee, store, warehouse, payment, return and loyalty report routes under `/api/v1/dashboard` and `/api/v1/reports`. Non-owner users are always constrained to `users.assigned_store_id`; omitting `store_id` never expands their access.
+The reporting layer aggregates live operational records and exposes owner KPIs, sales, inventory, finance, purchase, customer, employee, store, warehouse, payment, return and loyalty report routes under `/api/v1/dashboard` and `/api/v1/reports`. Non-owner users are always constrained to `users.assigned_store_id`; omitting `store_id` never expands their access.
 
-Revenue is completed-invoice grand total. COGS uses the inventory cost snapshot available to each invoice item, gross profit is revenue minus COGS, and net profit subtracts approved operating expenses and completed refunds. Inventory valuation uses persisted inventory value. GST reports use invoice GST snapshots; these operational reports are not a substitute for statutory filing or audited accounting.
+Revenue is the completed-invoice final billed amount. COGS uses inventory cost, gross profit is revenue minus COGS, and estimated operating profit subtracts approved expenses and completed refunds. Inventory valuation uses persisted inventory value.
 
 All presets and custom dates are resolved in the requested IANA business timezone (default `Asia/Kolkata`) and converted to exclusive UTC query boundaries. Supported presets include today, yesterday, current/previous week, month, quarter, and year.
 
@@ -261,9 +261,8 @@ Examples:
 ```bash
 curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/v1/dashboard/owner?preset=THIS_MONTH&compare_with_previous=true"
 curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/v1/reports/sales/summary?date_from=2026-08-01&date_to=2026-08-31"
-curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/v1/reports/gst/summary?preset=THIS_MONTH"
 curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/v1/reports/finance/profit-loss?preset=THIS_MONTH"
 curl -OJ -H "Authorization: Bearer $TOKEN" "http://localhost:8000/api/v1/reports/export?report_type=sales_summary&format=PDF"
 ```
 
-For Swagger, open `/api/v1/docs`, authorize as owner, then demonstrate owner dashboard → store filter → sales/GST/P&L → weekly summary → exports → schedules. Indexes on new date, store, status, and reporting discriminator fields are included in migration `20addf49befe`.
+For Swagger, open `/api/v1/docs`, authorize as owner, then demonstrate owner dashboard → store filter → sales/P&L → weekly summary → exports → schedules. Indexes on new date, store, status, and reporting discriminator fields are included in migration `20addf49befe`.

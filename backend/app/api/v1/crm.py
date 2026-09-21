@@ -21,8 +21,8 @@ from app.services.procurement import ProcurementPDFService
 router=APIRouter(tags=["Customer CRM"])
 def svc(c,s,a,r): return c(s,a,r.client.host if r.client else None,r.headers.get("user-agent"))
 @router.get("/customers/lookup",response_model=APIResponse[CustomerResponse|None])
-async def lookup(request:Request,session:DatabaseSession,mobile:str|None=None,email:str|None=None,customer_code:str|None=None,gst_number:str|None=None,actor:User=Depends(require_permission("customers.read"))):
- rows=await svc(CustomerService,session,actor,request).rows(mobile or email or customer_code or gst_number); return APIResponse(data=svc(CustomerService,session,actor,request).response(*rows[0]) if rows else None)
+async def lookup(request:Request,session:DatabaseSession,mobile:str|None=None,email:str|None=None,customer_code:str|None=None,actor:User=Depends(require_permission("customers.read"))):
+ rows=await svc(CustomerService,session,actor,request).rows(mobile or email or customer_code); return APIResponse(data=svc(CustomerService,session,actor,request).response(*rows[0]) if rows else None)
 @router.get("/customers",response_model=APIResponse[list[CustomerResponse]])
 async def customers(request:Request,session:DatabaseSession,search:str|None=None,actor:User=Depends(require_permission("customers.read"))):
  s=svc(CustomerService,session,actor,request); return APIResponse(data=[s.response(*x) for x in await s.rows(search)])
@@ -57,7 +57,7 @@ async def delete_customer(id:UUID,request:Request,session:DatabaseSession,actor:
 @router.get("/customers/{id}/invoices",response_model=APIResponse[list[dict]])
 @router.get("/customers/{id}/orders",response_model=APIResponse[list[dict]])
 async def orders(id:UUID,session:DatabaseSession,actor:User=Depends(require_permission("customers.read"))):
- rows=list((await session.scalars(select(Invoice).where(Invoice.customer_id==id).order_by(Invoice.created_at.desc()))).all()); return APIResponse(data=[{"id":str(x.id),"invoice_number":x.invoice_number,"date":x.created_at.isoformat(),"store_id":str(x.store_id),"subtotal":str(x.subtotal),"discount":str(x.discount),"gst":str(x.gst_total),"total":str(x.grand_total),"status":x.invoice_status.value} for x in rows])
+ rows=list((await session.scalars(select(Invoice).where(Invoice.customer_id==id).order_by(Invoice.created_at.desc()))).all()); return APIResponse(data=[{"id":str(x.id),"invoice_number":x.invoice_number,"date":x.created_at.isoformat(),"store_id":str(x.store_id),"subtotal":str(x.subtotal),"discount":str(x.discount),"total":str(x.grand_total),"status":x.invoice_status.value} for x in rows])
 @router.get("/customers/{id}/returns",response_model=APIResponse[list[dict]])
 async def customer_returns(id:UUID,session:DatabaseSession,actor:User=Depends(require_permission("sales_returns.read"))):
  rows=(await session.execute(select(Return).join(Invoice,Return.invoice_id==Invoice.id).where(Invoice.customer_id==id))).scalars().all(); return APIResponse(data=[{"id":str(x.id),"return_number":x.return_number,"amount":str(x.total_amount),"status":x.status.value} for x in rows])

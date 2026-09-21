@@ -74,4 +74,4 @@ No Meta credentials or authorized recipient were provided, so real Meta send, de
 
 ## Phase 6 handoff
 
-The operational chain now produces real supplier/inventory/transfer/shop/POS/customer/payment/invoice/loyalty/communication data. Phase 6 can aggregate these records for owner command-center, finance, GST, store/product performance and profitability without replacing the operational domains.
+The operational chain now produces real supplier/inventory/transfer/shop/POS/customer/payment/invoice/loyalty/communication data. Phase 6 can aggregate these records for owner command-center, finance, store/product performance and profitability without replacing the operational domains.

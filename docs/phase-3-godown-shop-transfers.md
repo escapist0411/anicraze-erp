@@ -25,7 +25,7 @@ Alternate terminal/review states are `REJECTED`, `CANCELLED`, and `DISCREPANCY`.
 - A shortage remains recorded on the transfer as unresolved discrepancy and is not added to shop inventory.
 - Excess is persisted as a discrepancy and is never automatically added to inventory.
 
-A transfer creates no invoice, GST record, revenue, customer transaction or sale.
+A transfer creates no invoice, customer billing record, revenue, customer transaction or sale.
 
 ## Transfer numbering and creation
 

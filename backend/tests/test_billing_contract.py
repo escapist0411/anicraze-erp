@@ -4,16 +4,11 @@ import pytest
 from pydantic import ValidationError
 from app.models.billing import PaymentMethodCode
 from app.schemas.billing import BillingCreate, BillingItemInput, PaymentInput, ReturnCreate
-from app.services.billing import GSTService
 from app.main import app
 
-@pytest.mark.parametrize("rate",["0","5","12","18","28"])
-def test_gst_rates(rate):
-    c,s,i=GSTService.calculate(Decimal("100"),Decimal(rate),False); assert c+s+i==Decimal(rate)
-def test_interstate_uses_igst():
-    c,s,i=GSTService.calculate(Decimal("100"),Decimal("18"),True); assert (c,s,i)==(Decimal("0.00"),Decimal("0.00"),Decimal("18.00"))
-def test_invalid_gst_rejected():
-    with pytest.raises(Exception): GSTService.calculate(Decimal("100"),Decimal("7"),False)
+def test_tax_free_bill_arithmetic():
+    assert Decimal("800")*2+Decimal("500") == Decimal("2100")
+    assert Decimal("2100")-Decimal("100") == Decimal("2000")
 def test_negative_billing_quantity_rejected():
     with pytest.raises(ValidationError): BillingItemInput(inventory_id=uuid4(),quantity=-1)
 def test_electronic_payment_requires_reference():

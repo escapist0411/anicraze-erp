@@ -68,7 +68,7 @@ class ReportingService:
         sold_cost = Decimal(await self.session.scalar(cost_q) or ZERO)
         return_where=[Return.created_at>=start,Return.created_at<end,Return.status==ReturnStatus.COMPLETED]
         if store_id:return_where.append(Invoice.store_id==store_id)
-        returned_total,returned_cost,returned_taxable = (await self.session.execute(select(func.coalesce(func.sum(ReturnItem.amount),0),func.coalesce(func.sum(ReturnItem.quantity*Inventory.average_cost),0),func.coalesce(func.sum(ReturnItem.amount*Invoice.taxable_amount/func.nullif(Invoice.grand_total,0)),0)).join(Return,Return.id==ReturnItem.return_id).join(InvoiceItem,InvoiceItem.id==ReturnItem.invoice_item_id).join(Inventory,Inventory.id==InvoiceItem.inventory_id).join(Invoice,Invoice.id==Return.invoice_id).where(*return_where))).one()
+        returned_total,returned_cost = (await self.session.execute(select(func.coalesce(func.sum(ReturnItem.amount),0),func.coalesce(func.sum(ReturnItem.quantity*Inventory.average_cost),0)).join(Return,Return.id==ReturnItem.return_id).join(InvoiceItem,InvoiceItem.id==ReturnItem.invoice_item_id).join(Inventory,Inventory.id==InvoiceItem.inventory_id).join(Invoice,Invoice.id==Return.invoice_id).where(*return_where))).one()
         net_sales=Decimal(net_billed)-Decimal(returned_total);cost=max(ZERO,sold_cost-Decimal(returned_cost))
         exp_where = [Expense.expense_date >= start.date(), Expense.expense_date < end.date(), Expense.status == ExpenseStatus.APPROVED, Expense.deleted_at.is_(None)]
         if store_id: exp_where.append(Expense.store_id == store_id)
@@ -93,7 +93,7 @@ class ReportingService:
     async def top_products(self, filters: ReportFilterRequest, limit=10) -> list[dict]:
         start, end = resolve_date_range(filters); store_id = scoped_store(self.actor, filters.store_id); where = [Invoice.created_at >= start, Invoice.created_at < end, Invoice.invoice_status.in_([InvoiceStatus.COMPLETED,InvoiceStatus.RETURNED])]
         if store_id: where.append(Invoice.store_id == store_id)
-        rows=(await self.session.execute(select(InvoiceItem.product_id,InvoiceItem.product_name,InvoiceItem.sku,func.sum(InvoiceItem.quantity),func.sum(InvoiceItem.taxable_amount),func.sum(InvoiceItem.quantity*Inventory.average_cost)).join(Invoice).join(Inventory,Inventory.id==InvoiceItem.inventory_id).where(*where).group_by(InvoiceItem.product_id,InvoiceItem.product_name,InvoiceItem.sku).order_by(func.sum(InvoiceItem.quantity).desc()).limit(limit))).all()
+        rows=(await self.session.execute(select(InvoiceItem.product_id,InvoiceItem.product_name,InvoiceItem.sku,func.sum(InvoiceItem.quantity),func.sum(InvoiceItem.line_total),func.sum(InvoiceItem.quantity*Inventory.average_cost)).join(Invoice).join(Inventory,Inventory.id==InvoiceItem.inventory_id).where(*where).group_by(InvoiceItem.product_id,InvoiceItem.product_name,InvoiceItem.sku).order_by(func.sum(InvoiceItem.quantity).desc()).limit(limit))).all()
         return [{"product_id":p,"product_name":n,"sku":sku,"quantity":int(q),"net_sales":Decimal(v),"revenue":Decimal(v),"gross_profit":Decimal(v)-Decimal(c)} for p,n,sku,q,v,c in rows]
 
     async def store_performance(self, filters: ReportFilterRequest) -> list[dict]:
@@ -101,13 +101,13 @@ class ReportingService:
         where = [Invoice.created_at >= start, Invoice.created_at < end, Invoice.invoice_status.in_([InvoiceStatus.COMPLETED, InvoiceStatus.RETURNED]), Invoice.deleted_at.is_(None)]
         if store_id: where.append(Invoice.store_id == store_id)
         rows = (await self.session.execute(
-            select(Store.id, Store.name, func.coalesce(func.sum(Invoice.taxable_amount), 0), func.count(Invoice.id))
+            select(Store.id, Store.name, func.coalesce(func.sum(Invoice.grand_total), 0), func.count(Invoice.id))
             .join(Invoice, Invoice.store_id == Store.id)
-            .where(*where).group_by(Store.id, Store.name).order_by(func.sum(Invoice.taxable_amount).desc())
+            .where(*where).group_by(Store.id, Store.name).order_by(func.sum(Invoice.grand_total).desc())
         )).all()
         return_where=[Return.created_at>=start,Return.created_at<end,Return.status==ReturnStatus.COMPLETED]
         if store_id:return_where.append(Invoice.store_id==store_id)
-        returned=dict((await self.session.execute(select(Invoice.store_id,func.coalesce(func.sum(ReturnItem.amount*Invoice.taxable_amount/func.nullif(Invoice.grand_total,0)),0)).join(Return,Return.id==ReturnItem.return_id).join(Invoice,Invoice.id==Return.invoice_id).where(*return_where).group_by(Invoice.store_id))).all())
+        returned=dict((await self.session.execute(select(Invoice.store_id,func.coalesce(func.sum(ReturnItem.amount),0)).join(Return,Return.id==ReturnItem.return_id).join(Invoice,Invoice.id==Return.invoice_id).where(*return_where).group_by(Invoice.store_id))).all())
         result=[]
         for sid,name,sales,orders in rows:
             net=Decimal(sales)-Decimal(returned.get(sid,ZERO));result.append({"store_id":sid,"store_name":name,"net_sales":net,"revenue":net,"orders":int(orders),"average_order_value":net/orders if orders else ZERO})
@@ -135,13 +135,13 @@ class ReportingService:
         if financial["estimated_net_operating_profit"] < 0: insights.append({"severity":"CRITICAL","code":"OPERATING_LOSS","message":"Estimated operating profit is negative for the selected period."})
         if inventory["low_stock_count"] or inventory["out_of_stock_count"]: insights.append({"severity":"WARNING","code":"REPLENISHMENT_REQUIRED","message":"Replenishment is required for low or out-of-stock products."})
         if not insights: insights.append({"severity":"SUCCESS","code":"OPERATIONS_STABLE","message":"No critical financial or inventory exception was detected for this period."})
-        return {"kpis":financial,"inventory_summary":inventory,"sales_trend":trend,"top_selling_products":await self.top_products(filters),"store_performance":await self.store_performance(filters),"payment_summary":await self.payment_summary(filters),"active_employees":active_employees,"attendance_percentage":(Decimal(present)*100/attendance_total).quantize(Decimal("0.01")) if attendance_total else ZERO,"alerts":alerts,"business_insights":insights,"definitions":{"net_sales":"Taxable sales excluding GST, less the taxable portion of completed returns.","gross_profit":"Net sales less estimated cost of goods sold.","estimated_net_operating_profit":"Gross profit less approved operating expenses; excludes payroll, depreciation, interest and income tax unless recorded as expenses.","inventory_valuation":"Current inventory quantities multiplied by current average cost."}}
+        return {"kpis":financial,"inventory_summary":inventory,"sales_trend":trend,"top_selling_products":await self.top_products(filters),"store_performance":await self.store_performance(filters),"payment_summary":await self.payment_summary(filters),"active_employees":active_employees,"attendance_percentage":(Decimal(present)*100/attendance_total).quantize(Decimal("0.01")) if attendance_total else ZERO,"alerts":alerts,"business_insights":insights,"definitions":{"net_sales":"Completed billed sales less completed returns.","gross_profit":"Net sales less estimated cost of goods sold.","estimated_net_operating_profit":"Gross profit less approved operating expenses; excludes payroll, depreciation, interest and income tax unless recorded as expenses.","inventory_valuation":"Current inventory quantities multiplied by current average cost."}}
 
     async def report(self, domain: str, report: str, filters: ReportFilterRequest) -> dict:
         await self.audit("REPORT_VIEWED", f"{domain}.{report}", filters.model_dump(mode="json"))
         if domain == "inventory": data = await self.inventory_summary(filters)
         elif domain == "payments": data = {"methods": await self.payment_summary(filters), **(await self.summary(filters))}
-        elif domain in {"sales","finance","gst","returns"}: data = await self.summary(filters)
+        elif domain in {"sales","finance","returns"}: data = await self.summary(filters)
         elif domain == "employees":
             data = (await self.owner_dashboard(filters)); data = {k:data[k] for k in ("active_employees","attendance_percentage")}
         else: data = await self.summary(filters)

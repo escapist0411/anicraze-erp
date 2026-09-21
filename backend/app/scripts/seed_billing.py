@@ -1,5 +1,5 @@
 import asyncio
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from app.database.session import AsyncSessionFactory
@@ -27,7 +27,7 @@ async def seed():
         made=[]
         if int(await s.scalar(select(func.count()).select_from(Invoice)) or 0)==0:
             for idx,inv in enumerate(inventory):
-                qty=2 if idx==0 else 1; base=Decimal("100")*qty; total=(base*(Decimal(1)+inv.product.gst_rate/100)).quantize(Decimal("1"),rounding=ROUND_HALF_UP)
+                qty=2 if idx==0 else 1; total=Decimal("100")*qty
                 made.append(await billing.create(BillingCreate(customer_id=customers[idx].id,store_id=store.id,items=[BillingItemInput(inventory_id=inv.id,quantity=qty,unit_price=Decimal("100"))],payments=[PaymentInput(method=PaymentMethodCode.CASH if idx==0 else PaymentMethodCode.UPI,amount=total,tendered_amount=total if idx==0 else None,transaction_reference=None if idx==0 else f"UPI-DEMO-{idx}")],notes="Demo POS invoice")))
         if made and not await s.scalar(select(Return)):
             await ReturnService(s,owner).create_return(ReturnCreate(invoice_id=made[0].id,reason="Demo partial return",items=[ReturnItemInput(invoice_item_id=made[0].items[0].id,quantity=1)],refund_method=PaymentMethodCode.CASH))

@@ -25,17 +25,6 @@ from app.utils.time import utc_now
 MONEY=Decimal("0.01")
 def money(v): return Decimal(v).quantize(MONEY,rounding=ROUND_HALF_UP)
 
-# Backward-compatible calculator retained for historical integrations only.
-# New sales and procurement flows never call it.
-class GSTService:
-    @staticmethod
-    def calculate(taxable:Decimal,rate:Decimal,interstate:bool):
-        if rate not in {Decimal("0"),Decimal("5"),Decimal("12"),Decimal("18"),Decimal("28")}:
-            raise ConflictError("Unsupported historical tax rate", "LEGACY_TAX_RATE_INVALID")
-        total=money(taxable*rate/100)
-        if interstate: return Decimal("0.00"),Decimal("0.00"),total
-        cgst=money(total/2); return cgst,total-cgst,Decimal("0.00")
-
 class InvoicePDFService:
     root=Path(__file__).resolve().parents[2]/"generated"/"invoices"
     def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User):

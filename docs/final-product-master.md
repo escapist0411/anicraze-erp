@@ -17,7 +17,7 @@ Keychains are limited to Rubber Keychain (₹100), Metal Keychain (₹100), and 
 
 The replacement never truncates or deletes business tables. All 19 earlier product records were changed to `ARCHIVED` and soft-deleted; 15 of them have ledger, invoice, or transfer history and remain addressable through their foreign keys. Their obsolete variants and images are also soft-deleted. Old sample category/series records remain stored for historical relationships but are inactive and hidden from active master lists.
 
-New catalog rows do not create inventory records, barcodes, images, brands, suppliers, HSN codes, or GST classifications. Required numeric fields use the existing unconfigured defaults (`purchase_price=0`, `gst_rate=0`, and `reorder_level=0`); these values mean “not configured,” not a commercial assertion. Inventory remains zero until receiving or another real stock workflow creates it. SKUs are allocated exclusively through the existing PostgreSQL `product_sku_sequence` workflow.
+New catalog rows do not create inventory records, barcodes, images, brands, suppliers, or statutory classifications. Required numeric fields use the existing unconfigured defaults (`purchase_price=0` and `reorder_level=0`); these values mean “not configured,” not a commercial assertion. Inventory remains zero until receiving or another real stock workflow creates it. SKUs are allocated exclusively through the existing PostgreSQL `product_sku_sequence` workflow.
 
 ## Import
 

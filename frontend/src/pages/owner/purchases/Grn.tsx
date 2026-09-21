@@ -1,2 +1,0 @@
-import { GRNCard, ApprovalTimeline } from '@/components/purchases/PurchasePanels';
-export default function Grn() { return <div className="mx-auto max-w-[1400px] space-y-6"><section><p className="text-sm text-muted-foreground">Receiving operations</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Goods received notes</h2></section><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]"><GRNCard /><ApprovalTimeline /></div></div>; }

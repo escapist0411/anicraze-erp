@@ -25,9 +25,9 @@ class ReportFilterRequest(Strict):
 
 
 class ExpenseCreateRequest(Strict):
-    expense_date: date; category: str; description: str = Field(min_length=2, max_length=500); amount: Decimal = Field(gt=0); gst_amount: Decimal = Field(0, ge=0); store_id: UUID | None = None; supplier_id: UUID | None = None; payment_method: str | None = None; reference_number: str | None = None
+    expense_date: date; category: str; description: str = Field(min_length=2, max_length=500); amount: Decimal = Field(gt=0); store_id: UUID | None = None; supplier_id: UUID | None = None; payment_method: str | None = None; reference_number: str | None = None
 class ExpenseUpdateRequest(Strict):
-    expense_date: date | None = None; category: str | None = None; description: str | None = None; amount: Decimal | None = Field(None, gt=0); gst_amount: Decimal | None = Field(None, ge=0); payment_method: str | None = None; reference_number: str | None = None
+    expense_date: date | None = None; category: str | None = None; description: str | None = None; amount: Decimal | None = Field(None, gt=0); payment_method: str | None = None; reference_number: str | None = None
 
 
 class ReportExportRequest(Strict):

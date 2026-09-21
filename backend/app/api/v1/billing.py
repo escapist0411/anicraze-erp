@@ -80,9 +80,6 @@ async def refunds(request:Request,session:DatabaseSession,actor:User=Depends(req
 async def analytics(session:DatabaseSession,actor:User=Depends(require_permission("billing.read"))): return APIResponse(data=await BillingAnalyticsService(session).summary())
 @router.get("/billing/reports/sales",response_model=APIResponse[list[InvoiceResponse]])
 async def sales_report(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("billing.read"))): return APIResponse(data=await svc(BillingService,session,actor,request).invoices.list())
-@router.get("/billing/reports/gst",response_model=APIResponse[list[dict]])
-async def gst_report(session:DatabaseSession,actor:User=Depends(require_permission("billing.read"))):
-    rows=(await session.execute(select(InvoiceTax.gst_rate,func.sum(InvoiceTax.taxable_amount),func.sum(InvoiceTax.cgst),func.sum(InvoiceTax.sgst),func.sum(InvoiceTax.igst),func.sum(InvoiceTax.total_tax)).group_by(InvoiceTax.gst_rate).order_by(InvoiceTax.gst_rate))).all(); return APIResponse(data=[{"gst_rate":str(x[0]),"taxable_amount":str(x[1]),"cgst":str(x[2]),"sgst":str(x[3]),"igst":str(x[4]),"gst_total":str(x[5])} for x in rows])
 @router.get("/billing/reports/payments",response_model=APIResponse[list[PaymentResponse]])
 async def payment_report(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("payments.read"))): return APIResponse(data=await svc(BillingService,session,actor,request).payments.list())
 @router.get("/billing/reports/returns",response_model=APIResponse[list[ReturnResponse]])
