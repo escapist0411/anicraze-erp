@@ -55,16 +55,28 @@ class SKUService:
 
 
 class BarcodeService:
-    def generate_svg(self, product: Product, format: str = "CODE128") -> tuple[str, str]:
-        value = product.sku
+    def _save_svg(self, product: Product, value: str, format: str) -> tuple[str, str]:
         folder = UPLOAD_ROOT / "barcodes"; folder.mkdir(parents=True, exist_ok=True)
         base = folder / f"{product.id}-{uuid4().hex[:8]}"
         if format == "EAN13":
-            value = f"890{product.id.int % 1_000_000_000:09d}"
-            code = barcode.get("ean13", value, writer=SVGWriter()); value = code.get_fullcode()
-        else: code = barcode.get("code128", value, writer=SVGWriter())
+            code = barcode.get("ean13", value[:12], writer=SVGWriter()); value = code.get_fullcode()
+        else:
+            code = barcode.get("code128", value, writer=SVGWriter())
         generated = code.save(str(base), options={"write_text": True})
         return value, generated
+
+    def generate_svg(self, product: Product, format: str = "CODE128") -> tuple[str, str]:
+        value = product.sku
+        if format == "EAN13":
+            value = f"890{product.id.int % 1_000_000_000:09d}"
+        return self._save_svg(product, value, format)
+
+    def restore_svg(self, product: Product) -> str:
+        """Recreate a missing barcode asset without changing its stored value."""
+        value = product.barcode or product.sku
+        format = "EAN13" if len(value) == 13 and value.isdigit() else "CODE128"
+        _, generated = self._save_svg(product, value, format)
+        return generated
 
 
 class CatalogServiceBase:
@@ -206,6 +218,12 @@ class ProductService(CatalogServiceBase):
             raise ConflictError("Generated barcode already exists", "PRODUCT_BARCODE_EXISTS")
         product.barcode, product.barcode_image_path = value, path
         await self.audit("PRODUCT_BARCODE_CHANGED" if previous else "PRODUCT_BARCODE_GENERATED", "product", product.id, {"previous": previous, "barcode": value}); return product
+
+    async def ensure_barcode_image(self, product: Product) -> Product:
+        if product.barcode and (not product.barcode_image_path or not Path(product.barcode_image_path).is_file()):
+            product.barcode_image_path = self.barcodes.restore_svg(product)
+            await self.session.flush()
+        return product
 
     async def add_image(self, product_id: UUID, upload: UploadFile, alt_text: str | None, sort_order: int, primary: bool):
         product = await self.get(product_id); path, url = await self.storage.save_product_image(product.id, upload)

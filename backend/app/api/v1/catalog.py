@@ -98,8 +98,10 @@ async def generate_barcode(product_id: UUID, data: BarcodeGenerateRequest, reque
 
 @router.get("/products/{product_id}/barcode", response_model=APIResponse[BarcodeResponse])
 async def get_barcode(product_id: UUID, request: Request, session: DatabaseSession, actor: User = Depends(require_permission("products.read"))):
-    p = await product_service(session, actor, request).get(product_id)
+    svc = product_service(session, actor, request)
+    p = await svc.get(product_id)
     if not p.barcode: raise NotFoundError("Barcode has not been generated", "PRODUCT_BARCODE_NOT_FOUND")
+    await svc.ensure_barcode_image(p)
     return APIResponse(data=BarcodeResponse(product_id=p.id, sku=p.sku, barcode=p.barcode, image_url=f"/uploads/barcodes/{__import__('pathlib').Path(p.barcode_image_path).name}" if p.barcode_image_path else None))
 
 
