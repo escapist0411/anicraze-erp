@@ -1,2 +1,0 @@
-import { CustomerForm } from '@/components/customers/CustomerPanels';
-export default function AddCustomer() { return <div className="mx-auto max-w-4xl space-y-6"><section><p className="text-sm text-muted-foreground">Customer directory / Add customer</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Add new customer</h2><p className="mt-2 text-sm text-muted-foreground">Create a rich customer profile with membership, loyalty, communication, and note preferences.</p></section><CustomerForm /></div>; }

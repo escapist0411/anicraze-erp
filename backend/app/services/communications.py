@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID,uuid4
 import httpx
+from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.config.settings import get_settings
@@ -56,8 +57,8 @@ class CommunicationService:
     async def create_invoice_job(self,invoice_id,automatic=True):
         invoice=await self.s.scalar(select(Invoice).options(selectinload(Invoice.items)).where(Invoice.id==invoice_id,Invoice.deleted_at.is_(None)))
         if not invoice:raise NotFoundError("Invoice not found","INVOICE_NOT_FOUND")
-        customer=await self.s.scalar(select(Customer).where(Customer.id==invoice.customer_id,Customer.deleted_at.is_(None)));profile=await self.s.scalar(select(CustomerProfile).where(CustomerProfile.customer_id==invoice.customer_id,CustomerProfile.deleted_at.is_(None)))
-        recipient=normalize_indian_phone(customer.phone if customer else None)
+        customer=await self.s.scalar(select(Customer).where(Customer.id==invoice.customer_id,Customer.deleted_at.is_(None))) if invoice.customer_id else None;profile=await self.s.scalar(select(CustomerProfile).where(CustomerProfile.customer_id==invoice.customer_id,CustomerProfile.deleted_at.is_(None))) if invoice.customer_id else None
+        recipient=normalize_indian_phone(invoice.customer_phone_snapshot or (customer.phone if customer else None))
         if not recipient:raise ConflictError("Customer has no valid mobile number","WHATSAPP_RECIPIENT_UNAVAILABLE")
         if profile and (not profile.communication_opt_in or not profile.whatsapp_opt_in):raise ConflictError("Customer opted out of WhatsApp","CUSTOMER_COMMUNICATION_OPT_OUT")
         key=f"invoice:{invoice.id}:whatsapp:invoice" if automatic else f"invoice:{invoice.id}:whatsapp:resend:{uuid4()}"
@@ -71,7 +72,7 @@ class CommunicationService:
         if comm.status in {"SENT","DELIVERED","READ","SIMULATED","DISABLED"}:return comm
         cfg=get_settings()
         if comm.attempt_count>=cfg.whatsapp_max_attempts:raise ConflictError("Maximum communication attempts reached","COMMUNICATION_RETRY_EXHAUSTED")
-        invoice=await self.s.scalar(select(Invoice).options(selectinload(Invoice.items)).where(Invoice.id==comm.related_invoice_id));customer=await self.s.scalar(select(Customer).where(Customer.id==comm.customer_id));comm.status="PROCESSING";comm.attempt_count+=1;comm.last_attempt_at=utc_now();await self.s.flush()
+        invoice=await self.s.scalar(select(Invoice).options(selectinload(Invoice.items)).where(Invoice.id==comm.related_invoice_id));customer=await self.s.scalar(select(Customer).where(Customer.id==comm.customer_id)) if comm.customer_id else SimpleNamespace(name=invoice.customer_name_snapshot,phone=invoice.customer_phone_snapshot);comm.status="PROCESSING";comm.attempt_count+=1;comm.last_attempt_at=utc_now();await self.s.flush()
         try:
             if not invoice.pdf_path or not Path(invoice.pdf_path).exists():raise FileNotFoundError("Invoice PDF is unavailable")
             result=await provider().send_invoice(invoice,customer,comm.recipient,Path(invoice.pdf_path));comm.status=result.status;comm.provider_message_id=result.message_id;comm.provider_reference=result.reference;comm.sent_at=utc_now() if result.status=="SENT" else None;comm.failure_code=None;comm.failure_message=None;comm.failed_at=None;await self.audit("WHATSAPP_PROVIDER_ACCEPTED" if result.status=="SENT" else "WHATSAPP_DEVELOPMENT_SIMULATED",comm,{"status":result.status})

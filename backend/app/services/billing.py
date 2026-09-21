@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from uuid import UUID
+from types import SimpleNamespace
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from reportlab.lib import colors
@@ -22,6 +23,7 @@ from app.schemas.billing import *
 from app.services.inventory import InventoryService
 from app.utils.time import utc_now
 from app.config.business import BUSINESS_NAME, BUSINESS_PHONE_DISPLAY
+from app.utils.phone import normalize_indian_phone
 
 MONEY=Decimal("0.01")
 def money(v): return Decimal(v).quantize(MONEY,rounding=ROUND_HALF_UP)
@@ -33,7 +35,7 @@ class InvoicePDFService:
         doc=SimpleDocTemplate(str(path),pagesize=A4,rightMargin=14*mm,leftMargin=14*mm,topMargin=12*mm,bottomMargin=12*mm,title=f"Invoice {invoice.invoice_number}")
         logo=Image(str(Path(__file__).resolve().parents[1]/"assets"/"anicraze-logo.png"),width=50*mm,height=16.67*mm)
         payment=", ".join(payment_methods or []) or "Recorded"
-        story=[logo,Paragraph("INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}<br/>Address: {(store.address or 'Address not provided').replace(chr(10), '<br/>')}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Employee: {employee.full_name} ({employee.employee_code or '—'})",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>{customer.address or ''}",styles["BodyText"]),Spacer(1,5*mm)]
+        story=[logo,Paragraph("INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}<br/>Address: {(store.address or 'Address not provided').replace(chr(10), '<br/>')}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Employee: {employee.full_name} ({employee.employee_code or '—'})",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>Customer Phone: {getattr(customer,'phone',None) or 'Not provided'}",styles["BodyText"]),Spacer(1,5*mm)]
         rows=[["SKU / Product","Qty","Rate","Discount","Amount"]]+[[f"{x.sku}\n{x.product_name}",str(x.quantity),f"{x.unit_price:.2f}",f"{x.discount:.2f}",f"{x.line_total:.2f}"] for x in invoice.items]
         table=Table(rows,colWidths=[85*mm,15*mm,25*mm,25*mm,28*mm],repeatRows=1); table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#111827")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP"),("ALIGN",(1,1),(-1,-1),"RIGHT")]))
         story += [table,Spacer(1,5*mm),Table([["Subtotal",f"INR {invoice.subtotal:.2f}"],["Discount",f"INR {invoice.discount:.2f}"],["TOTAL",f"INR {invoice.grand_total:.2f}"],["Payment",payment]],colWidths=[40*mm,35*mm],hAlign="RIGHT",style=[("GRID",(0,0),(-1,-1),.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),("FONTNAME",(0,2),(-1,2),"Helvetica-Bold")]),Spacer(1,7*mm),Paragraph("Terms: Goods once sold may be returned only under the ANICRAZE return policy. This is a computer-generated invoice.",styles["BodyText"]),Spacer(1,4*mm),Paragraph(f"{BUSINESS_NAME}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Thank you for shopping with ANICRAZE!",styles["BodyText"])]
@@ -62,14 +64,18 @@ class BillingService:
     async def create(self,data:BillingCreate):
         existing=await self.invoices.by_idempotency_key(data.idempotency_key)
         if existing: self.authorize_store(existing.store_id); return existing
-        self.authorize_store(data.store_id)
-        customer=await self.customer(data.customer_id); store=await self.s.scalar(select(Store).where(Store.id==data.store_id,Store.deleted_at.is_(None)))
+        store_id=self.actor.assigned_store_id or data.store_id
+        if not store_id: raise AuthorizationError("No shop is assigned for billing","BILLING_STORE_REQUIRED")
+        self.authorize_store(store_id)
+        customer_phone=normalize_indian_phone(data.customer_phone)
+        if data.customer_phone and not customer_phone: raise ConflictError("Enter a valid Indian WhatsApp number","BILLING_CUSTOMER_PHONE_INVALID")
+        customer=SimpleNamespace(name=data.customer_name.strip(),phone=customer_phone,address=None); store=await self.s.scalar(select(Store).where(Store.id==store_id,Store.deleted_at.is_(None)))
         if not store: raise NotFoundError("Store not found","STORE_NOT_FOUND")
         locked={}
         for requested in sorted(data.items,key=lambda i:str(i.inventory_id)):
             if requested.inventory_id in locked: raise ConflictError("Duplicate inventory line; combine quantities","BILLING_DUPLICATE_ITEM")
             inv=await self.inventory.get(requested.inventory_id,True)
-            if not inv or inv.store_id!=data.store_id: raise ConflictError("Inventory is not available at selected store","BILLING_STORE_INVENTORY_INVALID")
+            if not inv or inv.store_id!=store_id: raise ConflictError("Product is not available at this shop.","BILLING_STORE_INVENTORY_INVALID")
             if inv.product.status!=ProductStatus.ACTIVE: raise ConflictError("Inactive product cannot be billed","BILLING_PRODUCT_INACTIVE")
             if inv.available_quantity<requested.quantity: raise ConflictError("Insufficient stock","BILLING_INSUFFICIENT_STOCK")
             locked[requested.inventory_id]=inv
@@ -78,7 +84,7 @@ class BillingService:
             if requested.unit_price is not None and money(requested.unit_price)!=authoritative: raise ConflictError("Product pricing has changed; review the updated bill","BILLING_PRICE_CHANGED")
         raw_subtotal=sum((money((locked[i.inventory_id].variant.selling_price if locked[i.inventory_id].variant else locked[i.inventory_id].product.selling_price)*i.quantity) for i in data.items),Decimal(0))
         if data.invoice_discount>raw_subtotal: raise ConflictError("Invoice discount exceeds subtotal","BILLING_DISCOUNT_INVALID")
-        invoice=Invoice(invoice_number=await self.invoices.next_number(),idempotency_key=data.idempotency_key,customer_id=customer.id,store_id=store.id,employee_id=self.actor.id,subtotal=raw_subtotal,discount=Decimal(0),taxable_amount=0,cgst=0,sgst=0,igst=0,gst_total=0,grand_total=0,round_off=0,payment_status=PaymentStatus.PENDING,invoice_status=InvoiceStatus.DRAFT,notes=data.notes,created_by_id=self.actor.id,updated_by_id=self.actor.id); self.s.add(invoice); await self.s.flush()
+        invoice=Invoice(invoice_number=await self.invoices.next_number(),idempotency_key=data.idempotency_key,customer_id=None,customer_name_snapshot=customer.name,customer_phone_snapshot=customer.phone,store_id=store.id,employee_id=self.actor.id,subtotal=raw_subtotal,discount=Decimal(0),taxable_amount=0,cgst=0,sgst=0,igst=0,gst_total=0,grand_total=0,round_off=0,payment_status=PaymentStatus.PENDING,invoice_status=InvoiceStatus.DRAFT,notes=data.notes,created_by_id=self.actor.id,updated_by_id=self.actor.id); self.s.add(invoice); await self.s.flush()
         subtotal=discount=Decimal(0); created_items=[]
         for index,requested in enumerate(data.items):
             inv=locked[requested.inventory_id]; product=inv.product; price=money(inv.variant.selling_price if inv.variant else product.selling_price)
@@ -90,7 +96,7 @@ class BillingService:
             line_discount=money(requested.discount+allocated)
             if line_discount>gross: raise ConflictError("Line discount exceeds line value","BILLING_DISCOUNT_INVALID")
             base=money(gross-line_discount)
-            item=InvoiceItem(invoice_id=invoice.id,inventory_id=inv.id,product_id=product.id,variant_id=inv.variant_id,sku=inv.variant.sku if inv.variant else product.sku,product_name=product.name,hsn_code=None,quantity=requested.quantity,unit_price=price,discount=line_discount,gst_rate=0,taxable_amount=base,tax_amount=0,line_total=base); self.s.add(item); created_items.append(item)
+            item=InvoiceItem(invoice_id=invoice.id,inventory_id=inv.id,product_id=product.id,variant_id=inv.variant_id,sku=inv.variant.sku if inv.variant else product.sku,product_name=product.name,hsn_code=None,quantity=requested.quantity,unit_price=price,unit_cost=money(inv.average_cost),discount=line_discount,gst_rate=0,taxable_amount=base,tax_amount=0,line_total=base); self.s.add(item); created_items.append(item)
             subtotal+=gross; discount+=line_discount
         grand=money(subtotal-discount); invoice.subtotal=money(subtotal); invoice.discount=money(discount); invoice.taxable_amount=grand; invoice.cgst=0; invoice.sgst=0; invoice.igst=0; invoice.gst_total=0; invoice.round_off=0; invoice.grand_total=grand
         paid=sum((p.amount for p in data.payments),Decimal(0)); payment_labels=[]
@@ -109,8 +115,6 @@ class BillingService:
         inventory_service=InventoryService(self.s,self.actor,self.ip,self.user_agent)
         for item in created_items: await inventory_service.move(locked[item.inventory_id],TransactionType.SALE,-item.quantity,invoice.invoice_number,f"invoice:{invoice.id}:{item.id}",remarks="POS invoice")
         await self.s.flush(); await self.s.refresh(invoice,attribute_names=["items","payments","created_at"])
-        from app.services.crm import CustomerCRMIntegration
-        await CustomerCRMIntegration(self.s,self.actor,self.ip,self.user_agent).invoice_completed(invoice)
         try: invoice.pdf_path=str(InvoicePDFService().generate(invoice,customer,store,self.actor,payment_labels))
         except Exception: logging.getLogger(__name__).exception("Invoice PDF generation failed for %s",invoice.invoice_number)
         await self.audit("INVOICE_COMPLETED","invoice",invoice.id,{"number":invoice.invoice_number,"total":str(invoice.grand_total),"store_id":str(store.id)}); await self.s.flush(); return await self.invoices.get(invoice.id)

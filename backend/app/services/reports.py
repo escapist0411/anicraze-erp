@@ -113,6 +113,23 @@ class ReportingService:
             net=Decimal(sales)-Decimal(returned.get(sid,ZERO));result.append({"store_id":sid,"store_name":name,"net_sales":net,"revenue":net,"orders":int(orders),"average_order_value":net/orders if orders else ZERO})
         return result
 
+    async def shop_profit_loss(self, filters: ReportFilterRequest) -> dict:
+        start,end=resolve_date_range(filters);store_id=scoped_store(self.actor,filters.store_id)
+        where=[Invoice.created_at>=start,Invoice.created_at<end,Invoice.invoice_status.in_([InvoiceStatus.COMPLETED,InvoiceStatus.RETURNED]),Invoice.deleted_at.is_(None)]
+        if store_id:where.append(Invoice.store_id==store_id)
+        sales=(await self.session.execute(select(Invoice.store_id,Store.name,func.sum(Invoice.subtotal),func.sum(Invoice.discount),func.sum(Invoice.grand_total)).join(Store,Store.id==Invoice.store_id).where(*where).group_by(Invoice.store_id,Store.name))).all()
+        costs=dict((await self.session.execute(select(Invoice.store_id,func.sum(InvoiceItem.quantity*InvoiceItem.unit_cost)).join(Invoice,Invoice.id==InvoiceItem.invoice_id).where(*where).group_by(Invoice.store_id))).all())
+        return_where=[Return.created_at>=start,Return.created_at<end,Return.status==ReturnStatus.COMPLETED]
+        if store_id:return_where.append(Invoice.store_id==store_id)
+        returns=dict((await self.session.execute(select(Invoice.store_id,func.sum(ReturnItem.amount),func.sum(ReturnItem.quantity*InvoiceItem.unit_cost)).join(Return,Return.id==ReturnItem.return_id).join(Invoice,Invoice.id==Return.invoice_id).join(InvoiceItem,InvoiceItem.id==ReturnItem.invoice_item_id).where(*return_where).group_by(Invoice.store_id))).all())
+        rows=[]
+        for sid,name,gross,discount,net_sales in sales:
+            sold_cost=costs.get(sid,ZERO)
+            returned,returned_cost=returns.get(sid,(ZERO,ZERO));net_revenue=Decimal(net_sales)-Decimal(returned or 0);cogs=max(ZERO,Decimal(sold_cost or 0)-Decimal(returned_cost or 0));profit=net_revenue-cogs
+            rows.append({"store_id":sid,"shop":name,"gross_sales":Decimal(gross or 0),"discounts":Decimal(discount or 0),"net_sales":Decimal(net_sales or 0),"returns_refunds":Decimal(returned or 0),"net_revenue":net_revenue,"cogs":cogs,"gross_profit":profit,"gross_margin_percentage":(profit*100/net_revenue).quantize(Decimal("0.01")) if net_revenue>0 else ZERO})
+        summary={key:sum((row[key] for row in rows),ZERO) for key in ("gross_sales","discounts","net_sales","returns_refunds","net_revenue","cogs","gross_profit")};summary["gross_margin_percentage"]=(summary["gross_profit"]*100/summary["net_revenue"]).quantize(Decimal("0.01")) if summary["net_revenue"]>0 else ZERO
+        return {"date_range":{"from":start,"to":end},"summary":summary,"rows":rows}
+
     async def payment_summary(self, filters: ReportFilterRequest) -> list[dict]:
         start, end = resolve_date_range(filters); store_id = scoped_store(self.actor, filters.store_id)
         where = [Payment.created_at >= start, Payment.created_at < end, Payment.deleted_at.is_(None), Payment.status.in_([PaymentStatus.PAID, PaymentStatus.PARTIAL])]
@@ -141,6 +158,7 @@ class ReportingService:
         await self.audit("REPORT_VIEWED", f"{domain}.{report}", filters.model_dump(mode="json"))
         if domain == "inventory": data = await self.inventory_summary(filters)
         elif domain == "payments": data = {"methods": await self.payment_summary(filters), **(await self.summary(filters))}
+        elif domain=="finance" and report=="shop-profit-loss": return {"report_type":"finance_shop-profit-loss","filters":filters.model_dump(mode="json"),**(await self.shop_profit_loss(filters))}
         elif domain in {"sales","finance","returns"}: data = await self.summary(filters)
         elif domain == "employees":
             data = (await self.owner_dashboard(filters)); data = {k:data[k] for k in ("active_employees","attendance_percentage")}

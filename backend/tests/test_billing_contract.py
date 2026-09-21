@@ -17,8 +17,9 @@ def test_billing_requires_idempotency_key():
     with pytest.raises(ValidationError): BillingCreate(customer_id=uuid4(),store_id=uuid4(),items=[BillingItemInput(inventory_id=uuid4(),quantity=1)],payments=[PaymentInput(method=PaymentMethodCode.CASH,amount=Decimal("1"))])
 def test_production_pos_endpoints_are_exposed():
     paths=app.openapi()["paths"]
-    for path in ("/api/v1/billing","/api/v1/billing/search","/api/v1/billing/barcode/{barcode}","/api/v1/billing/customers","/api/v1/invoices","/api/v1/invoices/{id}/pdf"):
+    for path in ("/api/v1/billing","/api/v1/billing/search","/api/v1/billing/barcode/{barcode}","/api/v1/billing/products","/api/v1/invoices","/api/v1/invoices/{id}/pdf"):
         assert path in paths
+    assert "/api/v1/billing/customers" not in paths
 def test_pos_barcode_schema_has_no_cost_or_margin_fields():
     fields=set(__import__('app.schemas.billing',fromlist=['BarcodeResult']).BarcodeResult.model_fields)
     assert not fields.intersection({"purchase_price","average_cost","inventory_value","profit","margin"})

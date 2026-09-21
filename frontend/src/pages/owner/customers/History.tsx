@@ -1,2 +1,0 @@
-import { CommunicationTimeline, CustomerProfile, CustomerInsights } from '@/components/customers/CustomerPanels';
-export default function History() { return <div className="mx-auto max-w-[1400px] space-y-6"><section><p className="text-sm text-muted-foreground">Customer activity</p><h2 className="mt-1 text-2xl font-semibold tracking-tight">Customer history</h2></section><CustomerProfile /><div className="grid gap-6 xl:grid-cols-2"><CommunicationTimeline /><CustomerInsights /></div></div>; }
