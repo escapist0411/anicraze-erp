@@ -29,11 +29,18 @@ class CatalogRepository:
         variant_product_id = await self.session.scalar(select(ProductVariant.product_id).where(ProductVariant.sku == sku.upper(), ProductVariant.deleted_at.is_(None)))
         return await self.product(variant_product_id, include_deleted=include_deleted) if variant_product_id else None
 
-    async def product_by_barcode(self, barcode: str) -> Product | None:
-        product = await self.session.scalar(select(Product).options(*self.product_options()).where(Product.barcode == barcode, Product.deleted_at.is_(None)))
+    async def product_by_barcode(self, barcode: str, include_deleted: bool = False) -> Product | None:
+        normalized = barcode.strip().casefold()
+        product_stmt = select(Product).options(*self.product_options()).where(func.lower(func.btrim(Product.barcode)) == normalized)
+        if not include_deleted:
+            product_stmt = product_stmt.where(Product.deleted_at.is_(None))
+        product = await self.session.scalar(product_stmt)
         if product: return product
-        variant_product_id = await self.session.scalar(select(ProductVariant.product_id).where(ProductVariant.barcode == barcode, ProductVariant.deleted_at.is_(None)))
-        return await self.product(variant_product_id) if variant_product_id else None
+        variant_stmt = select(ProductVariant.product_id).where(func.lower(func.btrim(ProductVariant.barcode)) == normalized)
+        if not include_deleted:
+            variant_stmt = variant_stmt.where(ProductVariant.deleted_at.is_(None))
+        variant_product_id = await self.session.scalar(variant_stmt)
+        return await self.product(variant_product_id, include_deleted=include_deleted) if variant_product_id else None
 
     async def product_by_slug(self, slug: str) -> Product | None:
         return await self.session.scalar(select(Product).where(Product.slug == slug))
@@ -52,7 +59,10 @@ class CatalogRepository:
         if created_to: filters.append(func.date(Product.created_at) <= created_to)
         stmt = stmt.where(*filters); count = count.where(*filters)
         columns = {"name": Product.name, "sku": Product.sku, "selling_price": Product.selling_price, "purchase_price": Product.purchase_price, "created_at": Product.created_at, "updated_at": Product.updated_at, "status": Product.status}
-        column = columns.get(sort_by, Product.created_at); stmt = stmt.order_by(column.desc() if sort_order == "desc" else column.asc())
+        column = columns.get(sort_by, Product.created_at)
+        # Imports share timestamps; a unique tie-breaker prevents products from
+        # being skipped or repeated between Barcode Centre pages.
+        stmt = stmt.order_by(column.desc() if sort_order == "desc" else column.asc(), Product.id.asc())
         stmt = stmt.limit(limit_override or page_size)
         if limit_override is None: stmt = stmt.offset((page - 1) * page_size)
         return list((await self.session.scalars(stmt)).unique().all()), int(await self.session.scalar(count) or 0)

@@ -108,7 +108,10 @@ async def payslips(session:DatabaseSession,actor:User=Depends(require_permission
 async def payslip_pdf(id:UUID,session:DatabaseSession,actor:User=Depends(require_permission("payroll.payslip"))):
  p=await session.scalar(select(Payslip).where(Payslip.id==id));
  if not p:raise NotFoundError("Payslip not found","PAYSLIP_NOT_FOUND")
- e=await session.scalar(select(Employee).where(Employee.id==p.employee_id));path=PayslipPDFService().generate(p,e);p.pdf_path=str(path);return FileResponse(path,media_type="application/pdf",filename=f"{e.employee_code}-payslip.pdf")
+ e=await session.scalar(select(Employee).where(Employee.id==p.employee_id))
+ run=await session.get(PayrollRun,p.payroll_run_id);period=await session.get(PayrollPeriod,run.period_id) if run else None
+ location=await session.get(Store,e.store_id) if e.store_id else await session.get(Warehouse,e.warehouse_id) if e.warehouse_id else None
+ path=PayslipPDFService().generate(p,e,period=period,location=location.name if location else None);p.pdf_path=str(path);return FileResponse(path,media_type="application/pdf",filename=f"{e.employee_code}-payslip.pdf")
 @router.get("/performance/reviews",response_model=APIResponse[list[dict]])
 async def reviews(session:DatabaseSession,actor:User=Depends(require_permission("performance.read"))):rows=list((await session.scalars(select(PerformanceReview).where(PerformanceReview.deleted_at.is_(None)))).all());return APIResponse(data=[{"id":str(x.id),"employee_id":str(x.employee_id),"score":str(x.overall_score),"rating":x.rating,"status":x.status.value} for x in rows])
 @router.post("/performance/reviews",response_model=APIResponse[dict],status_code=201)

@@ -37,6 +37,10 @@ class ProductVariantCreateRequest(StrictModel):
     purchase_price: Decimal = Field(ge=0); landed_cost: Decimal | None = Field(None, ge=0); selling_price: Decimal = Field(ge=0); mrp: Decimal | None = Field(None, ge=0)
     status: ProductStatus = ProductStatus.ACTIVE
 
+    @field_validator("barcode", mode="before")
+    @classmethod
+    def normalize_barcode(cls, value): return value.strip() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_prices(self):
         if self.landed_cost is not None and self.landed_cost < self.purchase_price: raise ValueError("landed_cost cannot be below purchase_price")
@@ -77,6 +81,10 @@ class ProductCreateRequest(ProductPricingMixin):
     @classmethod
     def normalize_sku(cls, value): return value.strip().upper() if value else value
 
+    @field_validator("barcode", mode="before")
+    @classmethod
+    def normalize_barcode(cls, value): return value.strip() if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_variant_mode(self):
         if self.has_variants and not self.variants: raise ValueError("variants are required when has_variants is true")
@@ -95,6 +103,10 @@ class ProductUpdateRequest(StrictModel):
     purchase_price: Decimal | None = Field(None, ge=0); landed_cost: Decimal | None = Field(None, ge=0); selling_price: Decimal | None = Field(None, ge=0); mrp: Decimal | None = Field(None, ge=0); discount_percentage: Decimal | None = Field(None, ge=0, le=100); minimum_selling_price: Decimal | None = Field(None, ge=0)
     reorder_level: int | None = Field(None, ge=0); unit_of_measure: str | None = None; weight: Decimal | None = Field(None, ge=0); length: Decimal | None = Field(None, ge=0); width: Decimal | None = Field(None, ge=0); height: Decimal | None = Field(None, ge=0)
     is_serialized: bool | None = None; has_variants: bool | None = None; status: ProductStatus | None = None; is_featured: bool | None = None
+
+    @field_validator("barcode", mode="before")
+    @classmethod
+    def normalize_barcode(cls, value): return value.strip() if isinstance(value, str) else value
 
 
 class ProductStatusUpdateRequest(StrictModel):

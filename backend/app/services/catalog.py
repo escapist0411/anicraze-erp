@@ -166,17 +166,24 @@ class ProductService(CatalogServiceBase):
         sku = data.sku.upper() if data.sku else await self.skus.generate(self.session, category.code)
         if data.sku and await self.repo.product_by_sku(sku, True): raise ConflictError("SKU already exists", "PRODUCT_SKU_EXISTS")
         while not data.sku and await self.repo.product_by_sku(sku, True): sku = await self.skus.generate(self.session, category.code)
-        if data.barcode and await self.repo.product_by_barcode(data.barcode): raise ConflictError("Barcode already exists", "PRODUCT_BARCODE_EXISTS")
+        if data.barcode and await self.repo.product_by_barcode(data.barcode, True): raise ConflictError("Barcode already exists", "PRODUCT_BARCODE_EXISTS")
         values = data.model_dump(exclude={"generate_barcode", "variants"}); values.update(sku=sku, anime_id=anime_id, hsn_code=None, gst_rate=Decimal("0"), slug=await self.unique_slug(Product, data.name), created_by_id=self.actor.id, updated_by_id=self.actor.id)
         product = Product(**values); self.session.add(product); await self.session.flush(); await self.session.refresh(product, attribute_names=["category", "brand", "anime", "character", "images", "variants"])
+        variant_barcodes: set[str] = set()
         for variant_data in data.variants:
             variant_sku = variant_data.sku.upper() if variant_data.sku else await self.skus.generate(self.session, category.code)
             while not variant_data.sku and (await self.repo.product_by_sku(variant_sku, True) or await self.session.scalar(select(ProductVariant).where(ProductVariant.sku == variant_sku))): variant_sku = await self.skus.generate(self.session, category.code)
             if variant_data.sku and (await self.repo.product_by_sku(variant_sku, True) or await self.session.scalar(select(ProductVariant).where(ProductVariant.sku == variant_sku))): raise ConflictError("Variant SKU already exists", "PRODUCT_SKU_EXISTS")
-            if variant_data.barcode and (await self.repo.product_by_barcode(variant_data.barcode) or await self.session.scalar(select(ProductVariant).where(ProductVariant.barcode == variant_data.barcode))): raise ConflictError("Variant barcode already exists", "PRODUCT_BARCODE_EXISTS")
+            if variant_data.barcode:
+                normalized_barcode = variant_data.barcode.casefold()
+                if normalized_barcode in variant_barcodes or await self.repo.product_by_barcode(variant_data.barcode, True): raise ConflictError("Variant barcode already exists", "PRODUCT_BARCODE_EXISTS")
+                variant_barcodes.add(normalized_barcode)
             variant = ProductVariant(product_id=product.id, sku=variant_sku, created_by_id=self.actor.id, updated_by_id=self.actor.id, **variant_data.model_dump(exclude={"sku"})); self.session.add(variant)
         if data.variants: await self.session.flush(); await self.session.refresh(product, attribute_names=["variants"])
-        if data.generate_barcode: await self.generate_barcode(product.id, False, "CODE128")
+        if product.barcode:
+            await self.ensure_barcode_image(product)
+        else:
+            await self.generate_barcode(product.id, False, "CODE128")
         await self.audit(audit_event, "product", product.id, {"sku": product.sku}); await self.session.refresh(product, attribute_names=["category", "brand", "anime", "character", "images", "variants", "updated_at"]); return product
 
     async def get(self, product_id: UUID, lock=False):
@@ -192,7 +199,7 @@ class ProductService(CatalogServiceBase):
             values["sku"] = values["sku"].upper(); duplicate = await self.repo.product_by_sku(values["sku"], True)
             if duplicate and duplicate.id != product.id: raise ConflictError("SKU already exists", "PRODUCT_SKU_EXISTS")
         if values.get("barcode"):
-            duplicate = await self.repo.product_by_barcode(values["barcode"])
+            duplicate = await self.repo.product_by_barcode(values["barcode"], True)
             if duplicate and duplicate.id != product.id: raise ConflictError("Barcode already exists", "PRODUCT_BARCODE_EXISTS")
         if values.get("name"): values["slug"] = await self.unique_slug(Product, values["name"], product.id)
         before = {k: str(getattr(product, k)) for k in values}; price_changed = any(k in values for k in ("purchase_price", "landed_cost", "selling_price", "mrp", "minimum_selling_price")); sku_changed = "sku" in values and values["sku"] != product.sku
@@ -212,8 +219,14 @@ class ProductService(CatalogServiceBase):
         product = await self.get(product_id, True)
         if product.barcode and not regenerate: raise ConflictError("Barcode exists; explicit regeneration required", "PRODUCT_BARCODE_EXISTS")
         previous = product.barcode; value, path = self.barcodes.generate_svg(product, format)
-        duplicate = await self.repo.product_by_barcode(value)
-        if duplicate and duplicate.id != product.id:
+        duplicate = await self.repo.product_by_barcode(value, True)
+        variant_duplicate = await self.session.scalar(
+            select(ProductVariant.id).where(
+                ProductVariant.deleted_at.is_(None),
+                func.lower(func.btrim(ProductVariant.barcode)) == value.casefold(),
+            )
+        )
+        if (duplicate and duplicate.id != product.id) or variant_duplicate:
             Path(path).unlink(missing_ok=True)
             raise ConflictError("Generated barcode already exists", "PRODUCT_BARCODE_EXISTS")
         product.barcode, product.barcode_image_path = value, path
@@ -255,9 +268,10 @@ class ProductImportService:
             try:
                 payload = ProductCreateRequest.model_validate({k: v for k, v in row.items() if v not in (None, "")});
                 if payload.sku and (payload.sku in seen_skus or await self.products.repo.product_by_sku(payload.sku, True)): raise ValueError("duplicate SKU")
-                if payload.barcode and (payload.barcode in seen_barcodes or await self.products.repo.product_by_barcode(payload.barcode)): raise ValueError("duplicate barcode")
+                barcode_key = payload.barcode.casefold() if payload.barcode else None
+                if payload.barcode and (barcode_key in seen_barcodes or await self.products.repo.product_by_barcode(payload.barcode, True)): raise ValueError("duplicate barcode")
                 if payload.sku: seen_skus.add(payload.sku)
-                if payload.barcode: seen_barcodes.add(payload.barcode)
+                if barcode_key: seen_barcodes.add(barcode_key)
                 valid.append(payload)
             except Exception as error: errors.append(ImportRowError(row=index, field=None, message=str(error)[:500]))
         created = 0

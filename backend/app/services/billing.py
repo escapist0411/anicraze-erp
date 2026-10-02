@@ -6,11 +6,7 @@ from uuid import UUID
 from types import SimpleNamespace
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from app.pdf.documents import invoice_pdf
 from app.exceptions.domain import AuthorizationError, ConflictError, NotFoundError
 from app.models.auth import AuditLog, User
 from app.models.billing import *
@@ -30,16 +26,11 @@ def money(v): return Decimal(v).quantize(MONEY,rounding=ROUND_HALF_UP)
 
 class InvoicePDFService:
     root=Path(__file__).resolve().parents[2]/"generated"/"invoices"
-    def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User,payment_methods:list[str]|None=None):
-        self.root.mkdir(parents=True,exist_ok=True); path=self.root/f"{invoice.invoice_number}.pdf"; styles=getSampleStyleSheet()
-        doc=SimpleDocTemplate(str(path),pagesize=A4,rightMargin=14*mm,leftMargin=14*mm,topMargin=12*mm,bottomMargin=12*mm,title=f"Invoice {invoice.invoice_number}")
-        logo=Image(str(Path(__file__).resolve().parents[1]/"assets"/"anicraze-logo.png"),width=50*mm,height=16.67*mm)
-        payment=", ".join(payment_methods or []) or "Recorded"
-        story=[logo,Paragraph("INVOICE",styles["Heading2"]),Paragraph(f"Invoice: {invoice.invoice_number}<br/>Date: {invoice.created_at:%d %b %Y %H:%M}<br/>Store: {store.name}<br/>Address: {(store.address or 'Address not provided').replace(chr(10), '<br/>')}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Employee: {employee.full_name} ({employee.employee_code or '—'})",styles["BodyText"]),Spacer(1,5*mm),Paragraph(f"Bill To: <b>{customer.name}</b><br/>Customer Phone: {getattr(customer,'phone',None) or 'Not provided'}",styles["BodyText"]),Spacer(1,5*mm)]
-        rows=[["SKU / Product","Qty","Rate","Discount","Amount"]]+[[f"{x.sku}\n{x.product_name}",str(x.quantity),f"{x.unit_price:.2f}",f"{x.discount:.2f}",f"{x.line_total:.2f}"] for x in invoice.items]
-        table=Table(rows,colWidths=[85*mm,15*mm,25*mm,25*mm,28*mm],repeatRows=1); table.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),colors.HexColor("#111827")),("TEXTCOLOR",(0,0),(-1,0),colors.white),("GRID",(0,0),(-1,-1),.4,colors.grey),("FONTSIZE",(0,0),(-1,-1),8),("VALIGN",(0,0),(-1,-1),"TOP"),("ALIGN",(1,1),(-1,-1),"RIGHT")]))
-        story += [table,Spacer(1,5*mm),Table([["Subtotal",f"INR {invoice.subtotal:.2f}"],["Discount",f"INR {invoice.discount:.2f}"],["TOTAL",f"INR {invoice.grand_total:.2f}"],["Payment",payment]],colWidths=[40*mm,35*mm],hAlign="RIGHT",style=[("GRID",(0,0),(-1,-1),.4,colors.grey),("ALIGN",(1,0),(1,-1),"RIGHT"),("FONTNAME",(0,2),(-1,2),"Helvetica-Bold")]),Spacer(1,7*mm),Paragraph("Terms: Goods once sold may be returned only under the ANICRAZE return policy. This is a computer-generated invoice.",styles["BodyText"]),Spacer(1,4*mm),Paragraph(f"{BUSINESS_NAME}<br/>WhatsApp / Contact: {BUSINESS_PHONE_DISPLAY}<br/>Thank you for shopping with ANICRAZE!",styles["BodyText"])]
-        doc.build(story); return path
+    def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User,payment_methods:list[str]|None=None, *, preview=False):
+        self.root.mkdir(parents=True,exist_ok=True)
+        path=self.root/f"{invoice.invoice_number}.pdf"
+        path.write_bytes(invoice_pdf(invoice,customer,store,employee,payment_methods,preview=preview))
+        return path
 
 class WhatsAppService:
     async def send_invoice(self,invoice,recipient): logging.getLogger(__name__).info("WhatsApp invoice %s queued for %s",invoice.invoice_number,recipient)

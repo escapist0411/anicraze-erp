@@ -1,0 +1,13 @@
+.env
+.env.*
+.production-users.env
+.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+backups
+uploads
+generated
+temp
+*.dump
+*.log

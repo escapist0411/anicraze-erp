@@ -51,3 +51,15 @@ backend/.production-users.env
 uploads/
 generated/
 temp/
+
+# Local review artifacts and deployment-tool state
+output/
+tmp/
+.netlify/
+backend/backups/
+
+# Local-only PDF review tooling (proof artifacts live under output/)
+backend/scripts/generate_pdf_review_pack.py
+backend/scripts/generate_pdf_review_v2.py
+backend/scripts/inspect_pdf_review_v2.py
+backend/scripts/validate_pdf_review_pack.py

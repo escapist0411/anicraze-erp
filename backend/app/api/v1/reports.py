@@ -6,8 +6,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.pdfgen.canvas import Canvas
+from app.pdf.documents import report_pdf
+from app.pdf.formatters import format_date
+from app.models.inventory import Store, Warehouse
 from sqlalchemy import func, select
 
 from app.dependencies.auth import DatabaseSession
@@ -63,19 +64,26 @@ def file_response(report_type:str,fmt:ReportFormat,payload:dict):
  if fmt==ReportFormat.CSV:
   out=io.StringIO(); keys=list(rows[0].keys()) if rows else []; w=csv.DictWriter(out,fieldnames=keys);w.writeheader();w.writerows([{k:safe_cell(v) for k,v in row.items()} for row in rows]);raw=b"\xef\xbb\xbf"+out.getvalue().encode();mime="text/csv";ext="csv"
  elif fmt==ReportFormat.PDF:
-  out=io.BytesIO();c=Canvas(out,pagesize=landscape(A4));c.setTitle(f"ANICRAZE {report_type}");c.setFont("Helvetica-Bold",16);c.drawString(35,560,f"ANICRAZE - {report_type.replace('_',' ').title()}");c.setFont("Helvetica",9);c.drawString(35,542,f"Generated {datetime.now(timezone.utc).isoformat()} | Confidential");y=515
-  for row in rows:
-   for k,v in row.items(): c.drawString(40,y,f"{k}: {v}"[:130]);y-=14
-   y-=8
-   if y<45:c.showPage();y=560
-  c.drawString(35,25,"ANICRAZE ERP | Confidential");c.save();raw=out.getvalue();mime="application/pdf";ext="pdf"
+  raw=report_pdf(report_type,payload);mime="application/pdf";ext="pdf"
  else:
   # SpreadsheetML is a standards-compliant Excel-readable workbook without formula evaluation.
   keys=list(rows[0].keys()) if rows else []; body="".join("<Row>"+"".join(f'<Cell><Data ss:Type="String">{safe_cell(row.get(k)).replace("&","&amp;").replace("<","&lt;")}</Data></Cell>' for k in keys)+"</Row>" for row in [dict(zip(keys,keys)),*rows]);raw=(f'<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Report"><Table>{body}</Table></Worksheet></Workbook>').encode();mime="application/vnd.ms-excel";ext="xls"
  return raw,mime,f"ANICRAZE_{safe}_{stamp}.{ext}"
 
+async def document_metadata(session, actor, report_filters, domain):
+ start,end=resolve_date_range(report_filters)
+ sid=scoped_store(actor,report_filters.store_id)
+ store=await session.get(Store,sid) if sid else None
+ warehouse=await session.get(Warehouse,report_filters.warehouse_id) if domain=="inventory" and report_filters.warehouse_id else None
+ location=store.name if store else "All Locations" if domain=="inventory" else "All Shops"
+ if warehouse:location+=f" / {warehouse.name}" if store else warehouse.name
+ return {"period":f"{format_date(start)} - {format_date(end-timedelta(days=1))}","location":location}
+
 async def export_impl(data:ReportExportRequest,session,actor):
- domain=(data.report_type.split("_",1)[0] or "sales");ensure_permission(actor,f"reports.{domain}.export");report=data.report_type[len(domain)+1:] or "summary";svc=ReportingService(session,actor);payload=await svc.report(domain,report,data.filters);raw,mime,name=file_response(data.report_type,data.format,payload);h=ReportExportHistory(report_type=data.report_type,format=data.format,filters_json=data.filters.model_dump(mode="json"),file_path=None,file_url=None,status=ExportStatus.COMPLETED,generated_by=actor.id,generated_at=utc_now(),expires_at=utc_now()+timedelta(days=7),error_message=None,file_size=len(raw),created_by_id=actor.id,updated_by_id=actor.id);session.add(h);await svc.audit("REPORT_EXPORTED",data.report_type,{"format":data.format.value});await session.flush();return StreamingResponse(io.BytesIO(raw),media_type=mime,headers={"Content-Disposition":f'attachment; filename="{name}"',"X-Export-History-Id":str(h.id)})
+ domain=(data.report_type.split("_",1)[0] or "sales");ensure_permission(actor,f"reports.{domain}.export");report=data.report_type[len(domain)+1:] or "summary";svc=ReportingService(session,actor);payload=await svc.report(domain,report,data.filters)
+ if data.format==ReportFormat.PDF:
+  payload["document_metadata"]=await document_metadata(session,actor,data.filters,domain)
+ raw,mime,name=file_response(data.report_type,data.format,payload);h=ReportExportHistory(report_type=data.report_type,format=data.format,filters_json=data.filters.model_dump(mode="json"),file_path=None,file_url=None,status=ExportStatus.COMPLETED,generated_by=actor.id,generated_at=utc_now(),expires_at=utc_now()+timedelta(days=7),error_message=None,file_size=len(raw),created_by_id=actor.id,updated_by_id=actor.id);session.add(h);await svc.audit("REPORT_EXPORTED",data.report_type,{"format":data.format.value});await session.flush();return StreamingResponse(io.BytesIO(raw),media_type=mime,headers={"Content-Disposition":f'attachment; filename="{name}"',"X-Export-History-Id":str(h.id)})
 
 @reports_router.post("/export")
 async def export_post(data:ReportExportRequest,session:DatabaseSession,actor:User=Depends(require_any_permission("reports.sales.export","reports.inventory.export","reports.finance.export"))):return await export_impl(data,session,actor)
@@ -151,7 +159,7 @@ async def run_schedule(id:UUID,session:DatabaseSession,actor:User=Depends(requir
   rows=[{"section":"Business Summary","metric":"Net Sales","value":dashboard["kpis"]["net_sales"]},{"section":"Business Summary","metric":"Gross Profit","value":dashboard["kpis"]["gross_profit"]},{"section":"Business Summary","metric":"Estimated Operating Profit","value":dashboard["kpis"]["estimated_net_operating_profit"]},{"section":"Business Summary","metric":"Bills","value":dashboard["kpis"]["orders"]},{"section":"Business Summary","metric":"Average Bill","value":dashboard["kpis"]["average_order_value"]},{"section":"Inventory","metric":"Inventory Value","value":dashboard["inventory_summary"]["inventory_value"]},{"section":"Inventory","metric":"Low Stock","value":dashboard["inventory_summary"]["low_stock_count"]},{"section":"Inventory","metric":"Out of Stock","value":dashboard["inventory_summary"]["out_of_stock_count"]}]
   rows += [{"section":"Store Performance","metric":s["store_name"],"value":s["net_sales"]} for s in dashboard["store_performance"]]
   rows += [{"section":"Payments","metric":p["payment_method"],"value":p["amount"]} for p in dashboard["payment_summary"]]
-  raw,_,_=file_response("weekly_owner_report",ReportFormat.PDF,{"rows":rows});filename=f'ANICRAZE_Weekly_Report_{start.strftime("%d")}-{(end-timedelta(days=1)).strftime("%d_%b_%Y")}.pdf';folder=Path("generated/reports");folder.mkdir(parents=True,exist_ok=True);path=folder/f'{now.strftime("%Y%m%dT%H%M%S")}_{filename}';path.write_bytes(raw)
+  raw,_,_=file_response("weekly_owner_report",ReportFormat.PDF,{"dashboard":dashboard,"document_metadata":await document_metadata(session,actor,report_filters,"weekly")});filename=f'ANICRAZE_Weekly_Report_{start.strftime("%d")}-{(end-timedelta(days=1)).strftime("%d_%b_%Y")}.pdf';folder=Path("generated/reports");folder.mkdir(parents=True,exist_ok=True);path=folder/f'{now.strftime("%Y%m%dT%H%M%S")}_{filename}';path.write_bytes(raw)
   history=ReportExportHistory(report_type="weekly_owner_report",format=ReportFormat.PDF,filters_json=report_filters.model_dump(mode="json"),file_path=str(path),file_url=f"/reports/history/{{id}}/download",status=ExportStatus.COMPLETED,generated_by=actor.id,generated_at=now,expires_at=None,error_message=None,file_size=len(raw),created_by_id=actor.id,updated_by_id=actor.id);session.add(history);await session.flush();history.file_url=f"/reports/history/{history.id}/download"
   recipients=list(x.recipient_emails_json or []);settings=get_settings()
   if not recipients and settings.owner_report_email:recipients=[settings.owner_report_email]

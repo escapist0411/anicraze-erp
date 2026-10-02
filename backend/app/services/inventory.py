@@ -164,10 +164,12 @@ class StockReceiptService(InventoryService):
         if receipt.status in {StockReceiptStatus.COMPLETED, StockReceiptStatus.CANCELLED}:
             raise ConflictError("This stock receipt can no longer be scanned", "STOCK_RECEIPT_SCAN_CLOSED")
         normalized = code.strip().casefold()
-        item = next((line for line in receipt.items if normalized in {
-            (line.variant.sku if line.variant else line.product.sku).casefold(),
-            ((line.variant.barcode if line.variant else line.product.barcode) or "").casefold(),
-        }), None)
+        if not normalized:
+            raise ConflictError("Scan or enter a barcode or SKU", "STOCK_RECEIPT_SCAN_CODE_REQUIRED")
+        item = next((line for line in receipt.items if normalized == (line.variant.sku if line.variant else line.product.sku).strip().casefold() or (
+            bool(line.variant.barcode if line.variant else line.product.barcode)
+            and normalized == (line.variant.barcode if line.variant else line.product.barcode).strip().casefold()
+        )), None)
         if not item:
             raise ConflictError("Barcode not linked to a product in this receipt", "STOCK_RECEIPT_PRODUCT_NOT_FOUND")
         if item.scanned_quantity >= item.expected_quantity:
