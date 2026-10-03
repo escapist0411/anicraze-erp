@@ -19,6 +19,7 @@ from app.models.catalog import Product, ProductVariant
 from app.models.procurement import Supplier
 from app.permissions.dependencies import require_permission
 from app.permissions.dependencies import require_owner
+from app.permissions.store_scope import assigned_shop, scoped_shop
 from app.schemas.common import APIResponse
 from app.schemas.inventory import *
 from app.services.inventory import AdjustmentService, AnalyticsService, InventoryService, ReservationService, StockReceiptService, TransferService
@@ -27,7 +28,10 @@ router=APIRouter(tags=["Inventory management"])
 def service(cls,session,actor,request): return cls(session,actor,request.client.host if request.client else None,request.headers.get("user-agent"))
 
 @router.get("/stores",response_model=APIResponse[list[LocationResponse]])
-async def stores(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in await service(InventoryService,session,actor,request).repo.locations(Store)])
+async def stores(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))):
+    shop=assigned_shop(actor)
+    rows=await service(InventoryService,session,actor,request).repo.locations(Store)
+    return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in rows if shop is None or x.id==shop])
 @router.post("/stores",response_model=APIResponse[LocationResponse],status_code=201)
 async def create_store(data:StoreCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_owner)): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Store,data),from_attributes=True))
 @router.patch("/stores/{id}",response_model=APIResponse[LocationResponse])
@@ -38,7 +42,9 @@ async def update_store(id:UUID,data:StoreUpdateRequest,request:Request,session:D
     for key,value in changes.items():setattr(store,key,value)
     store.updated_by_id=actor.id;svc=service(InventoryService,session,actor,request);await svc.audit("STORE_UPDATED","store",store.id,{"before":before,"changed_fields":list(changes)});await session.flush();return APIResponse(data=LocationResponse.model_validate(store,from_attributes=True))
 @router.get("/warehouses",response_model=APIResponse[list[LocationResponse]])
-async def warehouses(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in await service(InventoryService,session,actor,request).repo.locations(Warehouse)])
+async def warehouses(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))):
+    if assigned_shop(actor) is not None: raise AuthorizationError("Warehouse details are restricted", "WAREHOUSE_SCOPE_DENIED")
+    return APIResponse(data=[LocationResponse.model_validate(x,from_attributes=True) for x in await service(InventoryService,session,actor,request).repo.locations(Warehouse)])
 @router.post("/warehouses",response_model=APIResponse[LocationResponse],status_code=201)
 async def create_warehouse(data:WarehouseCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_owner)): return APIResponse(data=LocationResponse.model_validate(await service(InventoryService,session,actor,request).create_location(Warehouse,data),from_attributes=True))
 
@@ -82,9 +88,15 @@ async def import_stock_pdf(session:DatabaseSession,actor:User=Depends(require_pe
     return APIResponse(data=StockPdfImportPreview(rows=rows,readable_text=True,message=message))
 
 @router.get("/inventory/transactions",response_model=APIResponse[list[InventoryTransactionResponse]])
-async def transactions(request:Request,session:DatabaseSession,inventory_id:UUID|None=None,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(InventoryService,session,actor,request).repo.transactions(inventory_id))
+async def transactions(request:Request,session:DatabaseSession,inventory_id:UUID|None=None,actor:User=Depends(require_permission("inventory.read"))):
+    s=service(InventoryService,session,actor,request); shop=assigned_shop(actor)
+    if inventory_id is not None: await s.get(inventory_id)
+    return APIResponse(data=await s.repo.transactions(inventory_id,store_id=shop))
 @router.get("/inventory/ledger",response_model=APIResponse[list[LedgerResponse]])
-async def ledger(request:Request,session:DatabaseSession,inventory_id:UUID|None=None,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(InventoryService,session,actor,request).repo.ledger(inventory_id))
+async def ledger(request:Request,session:DatabaseSession,inventory_id:UUID|None=None,actor:User=Depends(require_permission("inventory.read"))):
+    s=service(InventoryService,session,actor,request); shop=assigned_shop(actor)
+    if inventory_id is not None: await s.get(inventory_id)
+    return APIResponse(data=await s.repo.ledger(inventory_id,store_id=shop))
 @router.get("/inventory/analytics/summary",response_model=APIResponse[InventoryAnalyticsResponse])
 async def analytics(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.analytics"))): return APIResponse(data=await service(AnalyticsService,session,actor,request).summary())
 @router.get("/inventory/reports/stock",response_model=APIResponse[list[InventoryResponse]])
@@ -98,11 +110,8 @@ async def export_inventory(request:Request,session:DatabaseSession,actor:User=De
     await s.audit("INVENTORY_EXPORTED","inventory_export",actor.id,{"count":len(rows)}); return StreamingResponse(iter([output.getvalue()]),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=anicraze-inventory.csv"})
 @router.get("/inventory",response_model=APIResponse[InventoryListResponse])
 async def inventory(request:Request,session:DatabaseSession,page:int=Query(1,ge=1),page_size:int=Query(20,ge=1,le=100),search:str|None=None,store_id:UUID|None=None,warehouse_id:UUID|None=None,category_id:UUID|None=None,brand_id:UUID|None=None,stock_level:str|None=Query(None,pattern="^(out|low|reorder)$"),product_id:UUID|None=None,actor:User=Depends(require_permission("inventory.read"))):
-    roles={role.code for role in actor.roles}
-    if roles&{"SALES","EMPLOYEE"}:
-        if not actor.assigned_store_id:raise AuthorizationError("No shop is assigned to this employee","INVENTORY_STORE_SCOPE_REQUIRED")
-        if store_id and store_id!=actor.assigned_store_id:raise AuthorizationError("Cross-shop inventory access is not allowed","INVENTORY_STORE_SCOPE_DENIED")
-        store_id=actor.assigned_store_id;warehouse_id=None
+    store_id=scoped_shop(actor,store_id)
+    if assigned_shop(actor) is not None and warehouse_id is not None: raise AuthorizationError("Warehouse inventory is restricted", "WAREHOUSE_SCOPE_DENIED")
     s=service(InventoryService,session,actor,request); rows,total=await s.repo.list(page,page_size,search,store_id,warehouse_id,category_id,brand_id,stock_level,product_id); return APIResponse(data=InventoryListResponse(items=[s.response(x) for x in rows],page=page,page_size=page_size,total=total,pages=ceil(total/page_size) if total else 0))
 @router.post("/inventory",response_model=APIResponse[InventoryResponse],status_code=201)
 async def create_inventory(data:InventoryCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.create"))): s=service(InventoryService,session,actor,request); return APIResponse(data=s.response(await s.create(data)))
@@ -123,7 +132,7 @@ async def damage(id:UUID,data:StockMovementRequest,request:Request,session:Datab
 async def returned(id:UUID,data:StockMovementRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.update"))): return await move(id,data,TransactionType.RETURN,1,request,session,actor)
 
 @router.get("/stock-transfers",response_model=APIResponse[list[TransferResponse]])
-async def transfers(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(TransferService,session,actor,request).repo.transfers(actor.assigned_store_id))
+async def transfers(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(TransferService,session,actor,request).repo.transfers(scoped_shop(actor)))
 @router.post("/stock-transfers",response_model=APIResponse[TransferResponse],status_code=201)
 async def create_transfer(data:TransferCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.transfer"))): return APIResponse(data=await service(TransferService,session,actor,request).create_transfer(data))
 @router.post("/stock-transfers/direct",response_model=APIResponse[TransferResponse],status_code=201)
@@ -155,14 +164,20 @@ async def transfer_receipt(id:UUID,request:Request,session:DatabaseSession,actor
     await s.audit("TRANSFER_RECEIPT_GENERATED","stock_transfer",transfer.id,{"items":len(transfer.items),"units":total});await session.flush()
     return StreamingResponse(io.BytesIO(raw),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="ANICRAZE_Transfer_{transfer.reference_number}.pdf"'})
 @router.get("/stock-adjustments",response_model=APIResponse[list[AdjustmentResponse]])
-async def adjustments(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(AdjustmentService,session,actor,request).repo.adjustments())
+async def adjustments(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))):
+    if assigned_shop(actor) is not None: raise AuthorizationError("Stock adjustments are restricted", "SHOP_SCOPE_DENIED")
+    return APIResponse(data=await service(AdjustmentService,session,actor,request).repo.adjustments())
 @router.post("/stock-adjustments",response_model=APIResponse[AdjustmentResponse],status_code=201)
 async def create_adjustment(data:AdjustmentCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.adjust"))): return APIResponse(data=await service(AdjustmentService,session,actor,request).create_adjustment(data))
 @router.get("/stock-reservations",response_model=APIResponse[list[ReservationResponse]])
-async def reservations(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(ReservationService,session,actor,request).repo.reservations())
+async def reservations(request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.read"))):
+    if assigned_shop(actor) is not None: raise AuthorizationError("Stock reservations are restricted", "SHOP_SCOPE_DENIED")
+    return APIResponse(data=await service(ReservationService,session,actor,request).repo.reservations())
 @router.post("/stock-reservations",response_model=APIResponse[ReservationResponse],status_code=201)
 async def reserve(data:ReservationCreateRequest,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.adjust"))): return APIResponse(data=await service(ReservationService,session,actor,request).create_reservation(data))
 @router.delete("/stock-reservations/{id}",response_model=APIResponse[ReservationResponse])
 async def release(id:UUID,request:Request,session:DatabaseSession,actor:User=Depends(require_permission("inventory.adjust"))): return APIResponse(data=await service(ReservationService,session,actor,request).release(id))
 @router.get("/inventory-alerts",response_model=APIResponse[list[AlertResponse]])
-async def alerts(request:Request,session:DatabaseSession,status:AlertStatus|None=None,actor:User=Depends(require_permission("inventory.read"))): return APIResponse(data=await service(InventoryService,session,actor,request).repo.alerts(status))
+async def alerts(request:Request,session:DatabaseSession,status:AlertStatus|None=None,actor:User=Depends(require_permission("inventory.read"))):
+    if assigned_shop(actor) is not None: raise AuthorizationError("Global stock alerts are restricted", "SHOP_SCOPE_DENIED")
+    return APIResponse(data=await service(InventoryService,session,actor,request).repo.alerts(status))

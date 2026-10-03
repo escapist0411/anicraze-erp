@@ -1,3 +1,5 @@
+# Existing temporary DEMO blueprint. Do not use this manifest for production:
+# its startup intentionally applies migrations automatically.
 services:
   - type: web
     name: anicraze-demo-api

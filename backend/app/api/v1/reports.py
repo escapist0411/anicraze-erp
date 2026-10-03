@@ -23,6 +23,7 @@ from app.schemas.common import APIResponse
 from app.schemas.reports import *
 from app.services.reports import ReportingService, resolve_date_range, scoped_store
 from app.utils.time import utc_now
+from app.storage import DocumentStorage
 
 dashboard_router=APIRouter(prefix="/dashboard",tags=["Owner dashboard"])
 reports_router=APIRouter(prefix="/reports",tags=["Reports"])
@@ -37,21 +38,22 @@ def permission_codes(actor: User) -> set[str]:
 def ensure_permission(actor: User, code: str):
  codes=permission_codes(actor)
  if "*" not in codes and code not in codes: raise AuthorizationError("You do not have permission to access this report", "REPORT_PERMISSION_DENIED")
-def ensure_management_dashboard(actor: User):
- if not ({r.code for r in actor.roles} & {"OWNER","ADMIN","MANAGER","ACCOUNTANT"}): raise AuthorizationError("The management command center is restricted", "DASHBOARD_MANAGEMENT_ONLY")
+def ensure_owner_dashboard(actor: User):
+ if not ({r.code for r in actor.roles} & {"OWNER","ADMIN"}): raise AuthorizationError("Owner financial dashboard is restricted", "DASHBOARD_OWNER_REQUIRED")
 
 @dashboard_router.get("/owner",response_model=APIResponse[dict])
 async def owner(session:DatabaseSession,actor:User=Depends(require_any_permission("dashboard.owner","dashboard.read")),date_from:date|None=None,date_to:date|None=None,preset:str|None=None,store_id:UUID|None=None,warehouse_id:UUID|None=None,timezone:str="Asia/Kolkata",compare_with_previous:bool=False):
- ensure_management_dashboard(actor);return APIResponse(data=await ReportingService(session,actor).owner_dashboard(filters(date_from,date_to,preset,store_id,warehouse_id,timezone,compare_with_previous)))
+ ensure_owner_dashboard(actor);return APIResponse(data=await ReportingService(session,actor).owner_dashboard(filters(date_from,date_to,preset,store_id,warehouse_id,timezone,compare_with_previous)))
 
 @dashboard_router.get("/{section}",response_model=APIResponse[dict])
 async def dashboard_section(section:str,session:DatabaseSession,actor:User=Depends(require_any_permission("dashboard.owner","dashboard.read")),date_from:date|None=None,date_to:date|None=None,preset:str|None=None,store_id:UUID|None=None,warehouse_id:UUID|None=None,timezone:str="Asia/Kolkata"):
+ ensure_owner_dashboard(actor)
  data=await ReportingService(session,actor).owner_dashboard(filters(date_from,date_to,preset,store_id,warehouse_id,timezone)); mapping={"kpis":"kpis","sales-trend":"sales_trend","store-performance":"store_performance","inventory-health":"inventory_summary","finance-summary":"kpis","employee-summary":"active_employees","alerts":"alerts","business-insights":"business_insights"}; key=mapping.get(section)
  return APIResponse(data={key:data.get(key)} if key else {"items":[]})
 
 @reports_router.get("/weekly-business-summary",response_model=APIResponse[dict])
 async def weekly(session:DatabaseSession,actor:User=report_dep(),store_id:UUID|None=None,timezone:str="Asia/Kolkata"):
- ensure_management_dashboard(actor);return APIResponse(data=await ReportingService(session,actor).owner_dashboard(filters(preset="THIS_WEEK",store_id=store_id,timezone=timezone)))
+ ensure_owner_dashboard(actor);return APIResponse(data=await ReportingService(session,actor).owner_dashboard(filters(preset="THIS_WEEK",store_id=store_id,timezone=timezone)))
 
 @reports_router.get("/export-history",response_model=APIResponse[list[dict]])
 async def export_history(session:DatabaseSession,actor:User=Depends(require_any_permission("reports.sales.export","reports.finance.export","reports.inventory.export"))):
@@ -159,7 +161,7 @@ async def run_schedule(id:UUID,session:DatabaseSession,actor:User=Depends(requir
   rows=[{"section":"Business Summary","metric":"Net Sales","value":dashboard["kpis"]["net_sales"]},{"section":"Business Summary","metric":"Gross Profit","value":dashboard["kpis"]["gross_profit"]},{"section":"Business Summary","metric":"Estimated Operating Profit","value":dashboard["kpis"]["estimated_net_operating_profit"]},{"section":"Business Summary","metric":"Bills","value":dashboard["kpis"]["orders"]},{"section":"Business Summary","metric":"Average Bill","value":dashboard["kpis"]["average_order_value"]},{"section":"Inventory","metric":"Inventory Value","value":dashboard["inventory_summary"]["inventory_value"]},{"section":"Inventory","metric":"Low Stock","value":dashboard["inventory_summary"]["low_stock_count"]},{"section":"Inventory","metric":"Out of Stock","value":dashboard["inventory_summary"]["out_of_stock_count"]}]
   rows += [{"section":"Store Performance","metric":s["store_name"],"value":s["net_sales"]} for s in dashboard["store_performance"]]
   rows += [{"section":"Payments","metric":p["payment_method"],"value":p["amount"]} for p in dashboard["payment_summary"]]
-  raw,_,_=file_response("weekly_owner_report",ReportFormat.PDF,{"dashboard":dashboard,"document_metadata":await document_metadata(session,actor,report_filters,"weekly")});filename=f'ANICRAZE_Weekly_Report_{start.strftime("%d")}-{(end-timedelta(days=1)).strftime("%d_%b_%Y")}.pdf';folder=Path("generated/reports");folder.mkdir(parents=True,exist_ok=True);path=folder/f'{now.strftime("%Y%m%dT%H%M%S")}_{filename}';path.write_bytes(raw)
+  raw,_,_=file_response("weekly_owner_report",ReportFormat.PDF,{"dashboard":dashboard,"document_metadata":await document_metadata(session,actor,report_filters,"weekly")});filename=f'ANICRAZE_Weekly_Report_{start.strftime("%d")}-{(end-timedelta(days=1)).strftime("%d_%b_%Y")}.pdf';path=DocumentStorage().save("reports",f'{now.strftime("%Y%m%dT%H%M%S")}_{filename}',raw)
   history=ReportExportHistory(report_type="weekly_owner_report",format=ReportFormat.PDF,filters_json=report_filters.model_dump(mode="json"),file_path=str(path),file_url=f"/reports/history/{{id}}/download",status=ExportStatus.COMPLETED,generated_by=actor.id,generated_at=now,expires_at=None,error_message=None,file_size=len(raw),created_by_id=actor.id,updated_by_id=actor.id);session.add(history);await session.flush();history.file_url=f"/reports/history/{history.id}/download"
   recipients=list(x.recipient_emails_json or []);settings=get_settings()
   if not recipients and settings.owner_report_email:recipients=[settings.owner_report_email]
@@ -175,8 +177,8 @@ async def run_schedule(id:UUID,session:DatabaseSession,actor:User=Depends(requir
 async def download_history(id:UUID,session:DatabaseSession,actor:User=Depends(require_any_permission("reports.finance.read","reports.schedules.read"))):
  row=await session.get(ReportExportHistory,id)
  if not row or row.generated_by!=actor.id or not row.file_path:raise NotFoundError("Report file not found","REPORT_FILE_NOT_FOUND")
- path=Path(row.file_path)
- if not path.is_file():raise NotFoundError("Report file not found","REPORT_FILE_NOT_FOUND")
+ try:path=DocumentStorage().read_path(row.file_path,"reports")
+ except FileNotFoundError:raise NotFoundError("Report file not found","REPORT_FILE_NOT_FOUND")
  return StreamingResponse(io.BytesIO(path.read_bytes()),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="{path.name.split("_",1)[-1]}"'})
 @schedules_router.get("/{id}",response_model=APIResponse[dict])
 async def get_schedule(id:UUID,session:DatabaseSession,actor:User=Depends(require_permission("reports.schedules.read"))):

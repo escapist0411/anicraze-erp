@@ -22,7 +22,10 @@ class InvoiceRepository:
         seq.current_value+=1; await self.s.flush(); return f"{prefix}-{seq.current_value:06d}"
 class PaymentRepository:
     def __init__(self,s): self.s=s
-    async def list(self): return list((await self.s.scalars(select(Payment).order_by(Payment.created_at.desc()).limit(500))).all())
+    async def list(self,store_id=None):
+        query=select(Payment)
+        if store_id is not None: query=query.join(Invoice).where(Invoice.store_id==store_id)
+        return list((await self.s.scalars(query.order_by(Payment.created_at.desc()).limit(500))).all())
     async def method(self,code):
         """Resolve an intrinsic POS method without external provider configuration."""
         name={PaymentMethodCode.CASH:"Cash",PaymentMethodCode.UPI:"UPI",PaymentMethodCode.CARD:"Card",PaymentMethodCode.OTHER:"Other"}.get(code,code.value.replace("_"," ").title())
@@ -34,8 +37,14 @@ class PaymentRepository:
         return await self.s.get(PaymentMethod,method_id)
 class ReturnRepository:
     def __init__(self,s): self.s=s
-    async def list(self): return list((await self.s.scalars(select(Return).options(selectinload(Return.items)).where(Return.deleted_at.is_(None)).order_by(Return.created_at.desc()))).unique().all())
+    async def list(self,store_id=None):
+        query=select(Return).options(selectinload(Return.items)).where(Return.deleted_at.is_(None))
+        if store_id is not None: query=query.join(Invoice).where(Invoice.store_id==store_id)
+        return list((await self.s.scalars(query.order_by(Return.created_at.desc()))).unique().all())
     async def returned_quantity(self,item_id): return int(await self.s.scalar(select(func.coalesce(func.sum(ReturnItem.quantity),0)).join(Return).where(ReturnItem.invoice_item_id==item_id,Return.status==ReturnStatus.COMPLETED)) or 0)
 class RefundRepository:
     def __init__(self,s): self.s=s
-    async def list(self): return list((await self.s.scalars(select(Refund).where(Refund.deleted_at.is_(None)).order_by(Refund.created_at.desc()))).all())
+    async def list(self,store_id=None):
+        query=select(Refund).where(Refund.deleted_at.is_(None))
+        if store_id is not None: query=query.join(Return).join(Invoice).where(Invoice.store_id==store_id)
+        return list((await self.s.scalars(query.order_by(Refund.created_at.desc()))).all())

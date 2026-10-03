@@ -19,6 +19,38 @@ def invoice_fixture(payments):
     return invoice, Obj(name="Sample Customer", phone="+91 98765 43210"), Obj(name="ANICRAZE Sample Shop", address="Sample address"), Obj(full_name="Sample Employee", employee_code="EMP-001")
 
 
+def review_invoice_fixture():
+    """Source for the review-pack sample; amounts must reconcile exactly."""
+    invoice = Obj(
+        invoice_number="ANI-INV-SAMPLE-UPI",
+        created_at=datetime(2026, 9, 27, 12, tzinfo=timezone.utc),
+        subtotal=Decimal("1200"), discount=Decimal("100"), grand_total=Decimal("1100"),
+        items=[
+            Obj(sku="ANI-KEY-000001", product_name="Gojo Keychain", quantity=1,
+                unit_price=Decimal("500"), line_total=Decimal("500")),
+            Obj(sku="ANI-KEY-000002", product_name="Naruto Keychain", quantity=2,
+                unit_price=Decimal("350"), line_total=Decimal("700")),
+        ],
+        payments=[Obj(method=Obj(name="UPI", code="UPI"), amount=Decimal("1100"))],
+    )
+    return invoice, Obj(name="Shreyas Sample", phone="+91 98765 43210"), Obj(
+        name="ANICRAZE Elpro City Square Mall",
+        address="Sample unit, Elpro City Square Mall, Chinchwad, Pune, Maharashtra 411033",
+    ), Obj(full_name="Sample Shop Employee", employee_code="EMP-ELPRO-002")
+
+
+def test_review_invoice_fixture_arithmetic_and_pdf(tmp_path):
+    invoice, customer, store, employee = review_invoice_fixture()
+    assert all(item.quantity * item.unit_price == item.line_total for item in invoice.items)
+    assert sum(item.line_total for item in invoice.items) == invoice.subtotal
+    assert invoice.subtotal - invoice.discount == invoice.grand_total
+    assert sum(payment.amount for payment in invoice.payments) == invoice.grand_total
+    path = tmp_path / "review-invoice.pdf"
+    path.write_bytes(invoice_pdf(invoice, customer, store, employee, preview=True))
+    text = PdfReader(path).pages[0].extract_text()
+    assert "₹700" in text and "₹1,200" in text and "₹1,100" in text
+
+
 def test_indian_currency_and_date_formatters():
     assert format_currency(499) == "₹499"
     assert format_currency(12999) == "₹12,999"

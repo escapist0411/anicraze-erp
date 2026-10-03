@@ -19,18 +19,16 @@ from app.schemas.billing import *
 from app.services.inventory import InventoryService
 from app.utils.time import utc_now
 from app.config.business import BUSINESS_NAME, BUSINESS_PHONE_DISPLAY
+from app.permissions.store_scope import require_shop_access
 from app.utils.phone import normalize_indian_phone
+from app.storage import DocumentStorage
 
 MONEY=Decimal("0.01")
 def money(v): return Decimal(v).quantize(MONEY,rounding=ROUND_HALF_UP)
 
 class InvoicePDFService:
-    root=Path(__file__).resolve().parents[2]/"generated"/"invoices"
     def generate(self,invoice:Invoice,customer:Customer,store:Store,employee:User,payment_methods:list[str]|None=None, *, preview=False):
-        self.root.mkdir(parents=True,exist_ok=True)
-        path=self.root/f"{invoice.invoice_number}.pdf"
-        path.write_bytes(invoice_pdf(invoice,customer,store,employee,payment_methods,preview=preview))
-        return path
+        return DocumentStorage().save("invoices",f"{invoice.invoice_number}.pdf",invoice_pdf(invoice,customer,store,employee,payment_methods,preview=preview))
 
 class WhatsAppService:
     async def send_invoice(self,invoice,recipient): logging.getLogger(__name__).info("WhatsApp invoice %s queued for %s",invoice.invoice_number,recipient)
@@ -51,10 +49,11 @@ class BillingService:
         return x
     async def create_customer(self,data): x=Customer(**data.model_dump(),created_by_id=self.actor.id,updated_by_id=self.actor.id); self.s.add(x); await self.s.flush(); await self.audit("CUSTOMER_CREATED","customer",x.id); return x
     def authorize_store(self,store_id):
-        if self.actor.assigned_store_id is not None and self.actor.assigned_store_id!=store_id: raise AuthorizationError("Billing is restricted to your assigned shop","BILLING_STORE_SCOPE_DENIED")
+        require_shop_access(self.actor,store_id)
     async def create(self,data:BillingCreate):
         existing=await self.invoices.by_idempotency_key(data.idempotency_key)
         if existing: self.authorize_store(existing.store_id); return existing
+        if data.store_id is not None: self.authorize_store(data.store_id)
         store_id=self.actor.assigned_store_id or data.store_id
         if not store_id: raise AuthorizationError("No shop is assigned for billing","BILLING_STORE_REQUIRED")
         self.authorize_store(store_id)
@@ -145,10 +144,13 @@ class ReturnService(BillingService):
 
 class BillingAnalyticsService:
     def __init__(self,s): self.s=s
-    async def summary(self):
+    async def summary(self,store_id=None):
         now=utc_now(); start_day=now.replace(hour=0,minute=0,second=0,microsecond=0); completed=(Invoice.invoice_status.in_([InvoiceStatus.COMPLETED,InvoiceStatus.RETURNED]),)
-        async def sales(since): return Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed,Invoice.created_at>=since)) or 0)
-        monthly=await sales(now-timedelta(days=30)); count=int(await self.s.scalar(select(func.count()).select_from(Invoice).where(*completed)) or 0); total=Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed)) or 0)
-        products=(await self.s.execute(select(InvoiceItem.product_name,func.sum(InvoiceItem.quantity).label("qty")).join(Invoice).where(*completed).group_by(InvoiceItem.product_name).order_by(func.sum(InvoiceItem.quantity).desc()).limit(10))).all()
-        methods=(await self.s.execute(select(PaymentMethod.name,func.sum(Payment.amount)).join(Payment).group_by(PaymentMethod.name))).all()
+        shop_filter=(Invoice.store_id==store_id,) if store_id is not None else ()
+        async def sales(since): return Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed,*shop_filter,Invoice.created_at>=since)) or 0)
+        monthly=await sales(now-timedelta(days=30)); count=int(await self.s.scalar(select(func.count()).select_from(Invoice).where(*completed,*shop_filter)) or 0); total=Decimal(await self.s.scalar(select(func.coalesce(func.sum(Invoice.grand_total),0)).where(*completed,*shop_filter)) or 0)
+        products=(await self.s.execute(select(InvoiceItem.product_name,func.sum(InvoiceItem.quantity).label("qty")).join(Invoice).where(*completed,*shop_filter).group_by(InvoiceItem.product_name).order_by(func.sum(InvoiceItem.quantity).desc()).limit(10))).all()
+        methods_query=select(PaymentMethod.name,func.sum(Payment.amount)).join(Payment)
+        if store_id is not None: methods_query=methods_query.join(Invoice).where(Invoice.store_id==store_id)
+        methods=(await self.s.execute(methods_query.group_by(PaymentMethod.name))).all()
         return BillingAnalytics(today_sales=await sales(start_day),weekly_sales=await sales(now-timedelta(days=7)),monthly_sales=monthly,average_bill=money(total/count) if count else Decimal(0),invoice_count=count,top_products=[{"product":x[0],"quantity":int(x[1])} for x in products],payment_methods=[{"method":x[0],"amount":str(x[1])} for x in methods])

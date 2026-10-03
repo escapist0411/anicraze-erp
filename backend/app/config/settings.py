@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Annotated, Literal
+from pathlib import Path
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -16,6 +17,8 @@ class Settings(BaseSettings):
     app_name: str = "ANICRAZE ERP API"
     api_v1_prefix: str = "/api/v1"
     database_url: str
+    storage_backend: Literal["local", "volume"] = Field(default="local", validation_alias="STORAGE_BACKEND")
+    storage_root: Path | None = Field(default=None, validation_alias="STORAGE_ROOT")
     redis_url: str = "redis://localhost:6379/0"
     redis_enabled: bool = True
     secret_key: str = Field(min_length=32)

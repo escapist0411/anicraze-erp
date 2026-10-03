@@ -12,7 +12,9 @@ config = context.config
 settings = get_settings()
 database_config = normalize_database_url(settings.database_url)
 sync_database_url = database_config.migration_url.render_as_string(hide_password=False)
-config.set_main_option("sqlalchemy.url", sync_database_url)
+# ConfigParser treats percent-encoded URL characters as interpolation tokens.
+# Escape only for Alembic's INI layer; the direct URL remains unchanged.
+config.set_main_option("sqlalchemy.url", sync_database_url.replace("%", "%%"))
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata

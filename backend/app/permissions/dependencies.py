@@ -1,11 +1,53 @@
 import logging
 from collections.abc import Callable
+from fastapi import Request
 
 from app.dependencies.auth import CurrentUser
 from app.exceptions.domain import AuthorizationError
 from app.models.auth import RoleName, User
 
 logger = logging.getLogger(__name__)
+
+# SALES is a shop POS role, not a legacy CRM/warehouse/finance role. Keep this
+# allowlist at the permission dependency so a newly added route fails closed.
+SALES_ROUTES = {
+    ("GET", "/api/v1/stores"),
+    ("GET", "/api/v1/inventory"),
+    ("GET", "/api/v1/inventory/{id}"),
+    ("GET", "/api/v1/inventory/transactions"),
+    ("GET", "/api/v1/inventory/ledger"),
+    ("GET", "/api/v1/stock-transfers"),
+    ("GET", "/api/v1/stock-transfers/{id}"),
+    ("GET", "/api/v1/stock-transfers/{id}/receipt"),
+    ("GET", "/api/v1/billing/search"),
+    ("GET", "/api/v1/billing/barcode/{barcode}"),
+    ("GET", "/api/v1/billing/products"),
+    ("POST", "/api/v1/billing"),
+    ("GET", "/api/v1/invoices"),
+    ("GET", "/api/v1/invoices/{id}"),
+    ("GET", "/api/v1/invoices/{id}/pdf"),
+    ("GET", "/api/v1/invoices/{id}/history"),
+    ("POST", "/api/v1/invoices/{id}/cancel"),
+    ("GET", "/api/v1/returns"),
+    ("POST", "/api/v1/returns"),
+    ("GET", "/api/v1/billing/analytics"),
+    ("GET", "/api/v1/billing/reports/sales"),
+    ("GET", "/api/v1/billing/reports/returns"),
+    ("GET", "/api/v1/cash-register"),
+    ("GET", "/api/v1/reports/{domain}/{report}"),
+}
+
+
+def _sales_route_allowed(user: User, request: Request) -> bool:
+    if "SALES" not in _role_names(user):
+        return True
+    route = request.scope.get("route")
+    path = getattr(route, "path", "")
+    if (request.method, path) not in SALES_ROUTES:
+        return False
+    if path == "/api/v1/reports/{domain}/{report}":
+        return request.path_params.get("domain") == "sales"
+    return True
 
 
 def _normalize_roles(roles: tuple[str | RoleName, ...]) -> set[str]:
@@ -44,9 +86,9 @@ def require_any_permission(*permission_codes: str) -> Callable[..., object]:
     if not expected:
         raise ValueError("At least one permission is required")
 
-    async def validator(user: CurrentUser) -> User:
+    async def validator(user: CurrentUser, request: Request) -> User:
         granted = _permission_codes(user)
-        if "*" not in granted and RoleName.OWNER.value not in _role_names(user) and not expected.intersection(granted):
+        if not _sales_route_allowed(user, request) or ("*" not in granted and RoleName.OWNER.value not in _role_names(user) and not expected.intersection(granted)):
             logger.warning("Permission access denied for user_id=%s required_any=%s", user.id, sorted(expected))
             raise AuthorizationError("A required permission is missing", "AUTH_PERMISSION_DENIED")
         return user
@@ -59,9 +101,9 @@ def require_all_permissions(*permission_codes: str) -> Callable[..., object]:
     if not expected:
         raise ValueError("At least one permission is required")
 
-    async def validator(user: CurrentUser) -> User:
+    async def validator(user: CurrentUser, request: Request) -> User:
         granted = _permission_codes(user)
-        if "*" not in granted and RoleName.OWNER.value not in _role_names(user) and not expected.issubset(granted):
+        if not _sales_route_allowed(user, request) or ("*" not in granted and RoleName.OWNER.value not in _role_names(user) and not expected.issubset(granted)):
             logger.warning("Permission access denied for user_id=%s required_all=%s", user.id, sorted(expected))
             raise AuthorizationError("A required permission is missing", "AUTH_PERMISSION_DENIED")
         return user

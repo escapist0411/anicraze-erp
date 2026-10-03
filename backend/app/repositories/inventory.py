@@ -38,13 +38,15 @@ class InventoryRepository:
     async def location(self, model, location_id): return await self.session.scalar(select(model).where(model.id==location_id,model.deleted_at.is_(None)))
     async def locations(self, model): return list((await self.session.scalars(select(model).where(model.deleted_at.is_(None)).order_by(model.name))).all())
     async def transaction_by_key(self,key): return await self.session.scalar(select(InventoryTransaction).where(InventoryTransaction.idempotency_key==key))
-    async def transactions(self, inventory_id=None, limit=200):
+    async def transactions(self, inventory_id=None, limit=200, store_id=None):
         stmt=select(InventoryTransaction)
         if inventory_id: stmt=stmt.where(InventoryTransaction.inventory_id==inventory_id)
+        if store_id is not None: stmt=stmt.where(InventoryTransaction.store_id==store_id)
         return list((await self.session.scalars(stmt.order_by(InventoryTransaction.created_at.desc()).limit(limit))).all())
-    async def ledger(self, inventory_id=None, limit=500):
+    async def ledger(self, inventory_id=None, limit=500, store_id=None):
         stmt=select(InventoryLedger)
         if inventory_id: stmt=stmt.where(InventoryLedger.inventory_id==inventory_id)
+        if store_id is not None: stmt=stmt.where(InventoryLedger.store_id==store_id)
         return list((await self.session.scalars(stmt.order_by(InventoryLedger.created_at.desc()).limit(limit))).all())
     async def transfers(self,target_store_id=None):
         stmt=select(StockTransfer).options(selectinload(StockTransfer.items).selectinload(StockTransferItem.product),selectinload(StockTransfer.items).selectinload(StockTransferItem.variant)).where(StockTransfer.deleted_at.is_(None))

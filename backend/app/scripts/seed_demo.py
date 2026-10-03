@@ -5,6 +5,7 @@ import json
 import os
 
 from sqlalchemy import select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.dialects.postgresql import insert
 
 from app.auth.passwords import hash_password
@@ -39,8 +40,18 @@ USERS = (
 
 
 def require_demo() -> None:
-    if get_settings().environment != "demo":
+    settings = get_settings()
+    if settings.environment != "demo":
         raise RuntimeError("Demo seed refused: APP_ENV/ENVIRONMENT must be 'demo'")
+    if make_url(settings.database_url).database != "anicraze_demo":
+        raise RuntimeError("Demo seed refused: configured database is not anicraze_demo")
+
+
+async def require_demo_database(session) -> None:
+    require_demo()
+    database = await session.scalar(text("SELECT current_database()"))
+    if database != "anicraze_demo":
+        raise RuntimeError("Demo seed/reset refused: connected database is not anicraze_demo")
 
 
 def password(name: str) -> str:
@@ -52,6 +63,8 @@ def password(name: str) -> str:
 
 async def seed_demo() -> dict[str, object]:
     require_demo()
+    async with AsyncSessionFactory() as preflight:
+        await require_demo_database(preflight)
     credentials = {name: password(name) for _, _, _, name, _ in USERS}
     # Uses the same final CSV and idempotent catalog importer as every environment.
     await import_catalog()

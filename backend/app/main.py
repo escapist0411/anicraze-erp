@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from app.storage import PublicAssetFiles
 
 from app.api.v1.router import api_router
 from app.config.paths import UPLOAD_DIR, ensure_runtime_directories
@@ -62,4 +62,4 @@ async def handle_unexpected_error(request: Request, error: Exception) -> JSONRes
 
 
 app.include_router(api_router, prefix=settings.api_v1_prefix)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+app.mount("/uploads", PublicAssetFiles(directory=UPLOAD_DIR), name="uploads")

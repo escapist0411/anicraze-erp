@@ -5,9 +5,8 @@ import json
 
 from sqlalchemy import text
 
-from app.config.settings import get_settings
 from app.database.session import AsyncSessionFactory
-from app.scripts.seed_demo import seed_demo
+from app.scripts.seed_demo import require_demo, require_demo_database, seed_demo
 
 TRANSACTION_TABLES = (
     "report_delivery_attempts", "report_export_history", "notifications", "audit_logs",
@@ -23,9 +22,9 @@ TRANSACTION_TABLES = (
 
 
 async def reset_demo() -> dict[str, object]:
-    if get_settings().environment != "demo":
-        raise RuntimeError("Demo reset refused: APP_ENV/ENVIRONMENT must be 'demo'")
+    require_demo()
     async with AsyncSessionFactory() as session:
+        await require_demo_database(session)
         await session.execute(text("SELECT pg_advisory_xact_lock(1602028)"))
         quoted = ", ".join(f'"{table}"' for table in TRANSACTION_TABLES)
         await session.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))

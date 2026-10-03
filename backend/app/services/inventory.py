@@ -14,6 +14,7 @@ from app.models.inventory import *
 from app.models.notifications import Notification, NotificationCategory, NotificationSeverity
 from app.repositories.inventory import InventoryRepository
 from app.repositories.management import ManagementRepository
+from app.permissions.store_scope import require_shop_access
 from app.schemas.inventory import *
 from app.schemas.payables import PayableCreate
 from app.services.payables import PayableService
@@ -33,6 +34,7 @@ class InventoryService:
     async def get(self,id,lock=False):
         item=await self.repo.get(id,lock)
         if not item: raise NotFoundError("Inventory not found","INVENTORY_NOT_FOUND")
+        require_shop_access(self.actor,item.store_id)
         return item
     def response(self,x):
         p=x.product; available=x.available_quantity
@@ -362,7 +364,7 @@ class TransferService(InventoryService):
             t.cancellation_reason=reason or "Not provided"; await self.audit(f"TRANSFER_{status.value}","stock_transfer",t.id,{"reason":reason})
         t.status=status; t.updated_by_id=self.actor.id; await self.session.flush(); return await self.repo.transfer(t.id)
     def authorize_destination(self,t):
-        if self.actor.assigned_store_id is not None and self.actor.assigned_store_id!=t.target_store_id: raise AuthorizationError("Transfer is assigned to another store","TRANSFER_STORE_SCOPE_DENIED")
+        require_shop_access(self.actor,t.target_store_id)
     async def pick(self,id,data):
         t=await self.repo.transfer(id,True)
         if not t or t.status not in {TransferStatus.PICKING,TransferStatus.APPROVED}: raise ConflictError("Transfer is not available for picking","TRANSFER_STATUS_INVALID")

@@ -116,11 +116,10 @@ class PayrollService(HRBase):
   if target==PayrollStatus.FINALIZED:r.finalized_at=utc_now()
   await self.audit(f"PAYROLL_{target.value}","payroll_run",r.id);return r
 class PayslipPDFService:
- root=Path(__file__).resolve().parents[2]/"generated"/"payslips"
  def generate(self,p,e, *, period=None, location=None, preview=False):
   from app.pdf.documents import payslip_pdf
-  self.root.mkdir(parents=True,exist_ok=True);path=self.root/f"{p.id}.pdf"
-  path.write_bytes(payslip_pdf(p,e,period=period,location=location,preview=preview));return path
+  from app.storage import DocumentStorage
+  return DocumentStorage().save("payslips",f"{p.id}.pdf",payslip_pdf(p,e,period=period,location=location,preview=preview))
 class HRAnalyticsService(HRBase):
  async def dashboard(self):
   total=int(await self.s.scalar(select(func.count()).select_from(Employee).where(Employee.deleted_at.is_(None))) or 0);active=int(await self.s.scalar(select(func.count()).select_from(Employee).where(Employee.employment_status==EmploymentStatus.ACTIVE,Employee.deleted_at.is_(None))) or 0);present=int(await self.s.scalar(select(func.count()).select_from(Attendance).where(Attendance.attendance_date==date.today(),Attendance.status.in_([AttendanceStatus.PRESENT,AttendanceStatus.LATE]))) or 0);late=int(await self.s.scalar(select(func.count()).select_from(Attendance).where(Attendance.attendance_date==date.today(),Attendance.status==AttendanceStatus.LATE)) or 0);pending=int(await self.s.scalar(select(func.count()).select_from(LeaveRequest).where(LeaveRequest.status==LeaveStatus.SUBMITTED)) or 0);pay=Decimal(await self.s.scalar(select(func.coalesce(func.sum(PayrollRun.net_total),0)).where(PayrollRun.status.in_([PayrollStatus.CALCULATED,PayrollStatus.APPROVED,PayrollStatus.FINALIZED]))) or 0);return {"total_employees":total,"active_employees":active,"present_today":present,"absent_today":max(0,active-present),"late_arrivals":late,"pending_leave_requests":pending,"monthly_payroll_estimate":str(pay),"attendance_percentage":round(100*present/active,2) if active else 0,"insights":[f"{pending} leave requests require approval.",f"{late} employees arrived late today."]}

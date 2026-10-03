@@ -48,6 +48,7 @@ def resolve_date_range(filters: ReportFilterRequest) -> tuple[datetime, datetime
 def scoped_store(actor: User, requested: UUID | None) -> UUID | None:
     roles = {r.code for r in actor.roles}
     if roles & {"OWNER", "ADMIN"}: return requested
+    if "MANAGER" in roles and actor.assigned_store_id is None: return requested
     if actor.assigned_store_id is None: raise AuthorizationError("No store is assigned to this user", "REPORT_STORE_SCOPE_REQUIRED")
     if requested and requested != actor.assigned_store_id: raise AuthorizationError("Cross-store reporting is not allowed", "REPORT_STORE_SCOPE_DENIED")
     return actor.assigned_store_id
