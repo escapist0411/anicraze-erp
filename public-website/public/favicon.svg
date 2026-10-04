@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ANICRAZE">
+  <rect width="64" height="64" rx="14" fill="#0d0e13"/>
+  <path d="M10 47 27 15h10l17 32H43l-4-8H25l-4 8H10Zm19-17h6l-3-7-3 7Z" fill="#fff"/>
+  <circle cx="47" cy="18" r="5" fill="#d42e42"/>
+</svg>
