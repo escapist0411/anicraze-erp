@@ -148,9 +148,10 @@ final class PdfService
             $summaryRows .= '<tr><td>' . self::h(ucwords(str_replace('_', ' ', $key)))
                 . '</td><td class="right">' . $display . '</td></tr>';
         }
+        $shop = empty($data['filters']['store_id']) ? 'All Shops' : $this->location('stores', (string) $data['filters']['store_id']);
         $html = $this->start($title, strtoupper((string) ($filters['preset'] ?? 'THIS_MONTH')))
             . '<div class="hero"><div><div class="eyebrow">BUSINESS REPORT</div><h1>' . self::h($title)
-            . '</h1><div class="muted">Period: ' . self::h((string) ($filters['preset'] ?? 'THIS_MONTH'))
+            . '</h1><div class="muted">Shop: ' . self::h($shop) . ' &middot; Period: ' . self::h((string) ($filters['preset'] ?? 'THIS_MONTH'))
             . '</div></div></div><table><thead><tr><th>Metric</th><th class="right">Value</th></tr></thead><tbody>'
             . $summaryRows . '</tbody></table>';
         if ($name === 'shop-profit-loss') {
