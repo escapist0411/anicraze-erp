@@ -49,6 +49,11 @@ export const authService = {
     return data.message ?? 'If an account exists for this email, password reset instructions have been sent.';
   },
 
+  async resetPassword(token: string, password: string): Promise<string> {
+    const { data } = await api.post<ApiResponse<unknown>>('/auth/reset-password', { token, password });
+    return data.message ?? 'Password reset successfully.';
+  },
+
   async login(payload: LoginPayload): Promise<AuthSession> {
     const { data } = await api.post<ApiResponse<BackendLoginResponse>>('/auth/login', {
       email: payload.email,

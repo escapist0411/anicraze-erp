@@ -1,0 +1,20 @@
+CREATE TABLE notifications (
+ id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,
+ user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ dedupe_key VARCHAR(220) NOT NULL,
+ category VARCHAR(30) NOT NULL,
+ severity VARCHAR(20) NOT NULL,
+ title VARCHAR(160) NOT NULL,
+ message TEXT NOT NULL,
+ entity_type VARCHAR(50) NULL,
+ entity_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+ action_path VARCHAR(500) NULL,
+ is_read TINYINT(1) NOT NULL DEFAULT 0,
+ read_at DATETIME(6) NULL,
+ is_resolved TINYINT(1) NOT NULL DEFAULT 0,
+ created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+ UNIQUE KEY uq_notification_user_key (user_id, dedupe_key),
+ KEY idx_notification_user_active (user_id, is_resolved, created_at),
+ KEY idx_notification_user_unread (user_id, is_read, is_resolved),
+ CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

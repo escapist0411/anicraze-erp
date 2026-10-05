@@ -25,7 +25,7 @@ export const inventoryService={
  receiptSuppliers:()=>getData<{id:string;display_name:string}[]>('/stock-receipt-suppliers'),
  receipt:(id:string)=>getData<StockReceipt>(`/stock-receipts/${id}`),
  createReceipt:async(payload:unknown)=>(await api.post<{data:StockReceipt}>('/stock-receipts',payload)).data.data,
- scanReceipt:async(id:string,code:string)=>(await api.post<{data:StockReceipt}>(`/stock-receipts/${id}/scan`,{code})).data.data,
+ scanReceipt:async(id:string,code:string)=>(await api.post<{data:StockReceipt}>(`/stock-receipts/${id}/scan`,{code,scan_id:crypto.randomUUID()})).data.data,
  finalizeReceipt:async(id:string)=>(await api.post<{data:StockReceipt}>(`/stock-receipts/${id}/finalize`)).data.data,
  importReceiptPdf:async(file:File)=>{const form=new FormData();form.append('file',file);return (await api.post<{data:StockPdfImportPreview}>('/stock-receipts/import-pdf',form,{headers:{'Content-Type':'multipart/form-data'}})).data.data},
  };

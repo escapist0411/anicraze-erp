@@ -1,0 +1,10 @@
+# Hostinger/Apache fallback for the ERP's React Router BrowserRouter.
+# Existing files and directories (including /assets/*) are served directly.
+Options -MultiViews
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+# Missing static assets must be 404, not a misleading index.html response.
+RewriteRule ^assets/ - [R=404,L]
+RewriteRule ^ index.html [L]

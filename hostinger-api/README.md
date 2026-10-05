@@ -1,0 +1,9 @@
+# Hostinger PHP/MariaDB API candidate — ready for staging verification
+
+This is a local-only candidate for the existing ERP, not yet a replacement for the FastAPI/PostgreSQL reference in `backend/`. It now contains guarded MariaDB migrations and master-data provisioning, secure session/JWT auth, product/barcode reads, scoped inventory, receipt scanning, direct warehouse-to-shop transfer, POS/invoices, a subset of reports, and private PDF generation. The implemented routes are in `src/Http/Application.php`; unknown functionality fails closed.
+
+The isolated local MariaDB rehearsal has 160 products and canonical barcodes, eight stores, one warehouse, ten provisioned identities, and a zero-transaction clean baseline. Local integration tests cover the core simulated workflow, PDF/50×25 mm label generation, assigned-shop isolation, idempotency, and last-item concurrency. See `output/hostinger-migration-report.md` for dated evidence.
+
+The Phase 5C local closure covers all 64 current frontend route patterns and the required refresh/session internals. Product maintenance/import, payables, invoice cancellation, notifications, dashboards, reports, finance boundaries, private PDFs and password reset are implemented and exercised. Catalog/account import scripts deliberately refuse non-disposable database names. Actual Hostinger versions, extensions, document roots, mail delivery and quotas must still be verified in staging; this repository does not authorize deployment or DNS changes.
+
+No external service was changed by this candidate. Secrets belong only in private environment configuration; `vendor/`, runtime storage, and local proofs remain ignored by Git.

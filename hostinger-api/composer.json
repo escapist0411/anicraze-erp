@@ -1,0 +1,22 @@
+{
+  "name": "anicraze/hostinger-api",
+  "description": "ANICRAZE Hostinger PHP API candidate; not production-ready",
+  "license": "proprietary",
+  "type": "project",
+  "require": {
+    "php": "^8.3",
+    "ext-json": "*",
+    "ext-gd": "*",
+    "ext-pdo": "*",
+    "ext-pdo_mysql": "*",
+    "firebase/php-jwt": "^7.2",
+    "dompdf/dompdf": "^3.1",
+    "smalot/pdfparser": "^2.12",
+    "picqer/php-barcode-generator": "^3.2"
+  },
+  "autoload": {
+    "psr-4": {
+      "Anicraze\\": "src/"
+    }
+  }
+}

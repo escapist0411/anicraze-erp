@@ -1,0 +1,6 @@
+ALTER TABLE invoices
+ ADD COLUMN cancellation_reason VARCHAR(500) NULL,
+ ADD COLUMN cancelled_at DATETIME(6) NULL;
+
+ALTER TABLE payments
+ ADD COLUMN status VARCHAR(30) NOT NULL DEFAULT 'PAID';

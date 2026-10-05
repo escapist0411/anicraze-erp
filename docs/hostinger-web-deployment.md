@@ -1,0 +1,16 @@
+# Hostinger Web Hosting deployment gate — PHP candidate
+
+**Do not deploy the current `hostinger-api/`.** It serves health only; all business endpoints fail closed. Render, Neon and Netlify remain the working reference/fallback. This is a future staging checklist, not an account change or DNS instruction executed in this phase.
+
+## Host and layout to verify in hPanel
+
+Hostinger Web/Cloud hosting supports PHP and Composer on eligible plans; its hPanel “MySQL” service is documented as MariaDB. The exact legacy **Unlimited Web Hosting** entitlements, PHP version/extensions, database version/size/connections, SSH/Composer, subdomain roots and backups must be checked in the owner's actual account. Do not infer them from a current marketing tier. [PHP versions](https://www.hostinger.com/support/1575755-how-to-change-the-php-version-of-your-hostinger-hosting-plan/), [Composer](https://www.hostinger.com/support/5792078-how-to-use-composer-at-hostinger/), [limits](https://www.hostinger.com/support/6976044-parameters-and-limits-of-hosting-plans-in-hostinger/).
+
+- `anicraze.com`: upload the contents of `public-website/dist/` to its verified document root; no SPA fallback needed.
+- `erp.anicraze.com`: build `frontend/` with `VITE_API_URL=https://api.anicraze.com/api/v1`; upload the contents of `frontend/dist/`, including the copied `.htaccess`. Verify direct `/login`, `/owner/dashboard`, `/manager/dashboard`, `/employee/dashboard` refreshes and real static assets.
+- `api.anicraze.com`: only after full parity, map its document root to `hostinger-api/public/` **or** publish only the `public/` contents while keeping `src/`, `vendor/`, configuration and `storage/` outside the served directory. Confirm `mod_rewrite`/LiteSpeed rewrite behavior and HTTPS before use. [Hostinger rewrite support](https://www.hostinger.com/support/which-file-transfer-and-server-access-options-are-supported-at-hostinger/).
+- Private invoice/report/payslip originals belong outside every web document root, with restrictive permissions and separate backups. Public product images/barcode SVGs can live in a distinct public tree; never put `.env` or user documents there.
+
+Required PHP runtime, pending account verification: PHP 8.3+, `pdo_mysql`, JSON, OpenSSL, mbstring, fileinfo, GD and suitable PDF/font support; Composer 2 for vetted dependencies. The prototype currently needs only PHP/PDO/MySQL and has **no PDF/JWT implementation**. Production secrets must be supplied via a non-public host configuration mechanism; do not upload an `.env` into a public root. The final API must enforce one exact ERP CORS origin, disable debug and WhatsApp, apply HTTPS/security headers, rate limits, safe uploads and authenticated private document streaming.
+
+Do not schedule cron jobs until a specific ported function requires them. Do not run migrations on each web request or API restart. Staging acceptance requires all 232 route decisions, 104-table schema migration, 160-product/barcode import, 10-account bootstrap, zero operational baseline, two-shop IDOR tests, end-to-end inward→transfer→POS→PDF→P&L, concurrent last-unit tests and a database+files restore drill. Only after that should a separate cutover plan consider DNS, while old services remain available.
