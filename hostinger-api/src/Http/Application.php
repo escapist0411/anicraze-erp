@@ -28,6 +28,7 @@ use Anicraze\Finance\SupplierService;
 use Anicraze\Finance\PayableService;
 use Anicraze\Notifications\NotificationService;
 use Anicraze\People\AccountDirectoryService;
+use Anicraze\Config\Environment;
 
 final class Application
 {
@@ -42,7 +43,7 @@ final class Application
         header('X-Frame-Options: DENY');
         header('Cache-Control: no-store');
         $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-        $allowedOrigin = getenv('APP_ALLOWED_ORIGIN') ?: '';
+        $allowedOrigin = Environment::optional('APP_ALLOWED_ORIGIN');
         if ($origin !== '' && $allowedOrigin !== '' && hash_equals($allowedOrigin, $origin)) {
             header('Access-Control-Allow-Origin: ' . $allowedOrigin);
             header('Vary: Origin');

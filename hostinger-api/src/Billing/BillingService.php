@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Anicraze\Billing;
 
+use Anicraze\Config\Environment;
 use Anicraze\Database\Connection;
 use Anicraze\Database\Uuid;
 use Anicraze\Http\ApiException;
@@ -205,7 +206,7 @@ final class BillingService
             'employee_name' => $invoice['employee_name'], 'employee_code' => $invoice['employee_code'],
             'customer_name' => $invoice['customer_name_snapshot'], 'customer_phone' => $invoice['customer_phone_snapshot'],
             'customer_address' => null, 'payment_methods' => array_column($payments, 'method'),
-            'business_contact' => getenv('APP_BUSINESS_CONTACT') ?: '+918010526600',
+            'business_contact' => Environment::optional('APP_BUSINESS_CONTACT', '+918010526600'),
             'subtotal' => (float) $invoice['subtotal'], 'discount' => (float) $invoice['discount'],
             'grand_total' => (float) $invoice['grand_total'], 'payment_status' => $invoice['payment_status'],
             'invoice_status' => $invoice['invoice_status'], 'notes' => null,

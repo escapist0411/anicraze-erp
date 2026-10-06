@@ -2,18 +2,18 @@
 declare(strict_types=1);
 
 use Anicraze\Config\Environment;
+use Anicraze\Config\DatabaseTargetGuard;
 use Anicraze\Database\Connection;
 use Anicraze\Database\Uuid;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
+Environment::load(dirname(__DIR__));
 
 if (PHP_SAPI !== 'cli' || Environment::optional('ALLOW_CATALOG_IMPORT') !== '1') {
     throw new RuntimeException('Catalog import requires explicit CLI confirmation');
 }
 $name = Environment::required('DB_NAME');
-if (!str_starts_with($name, 'anicraze_phase5b_') || Environment::required('ANICRAZE_CONFIRM_DATABASE') !== $name) {
-    throw new RuntimeException('Importer is restricted to the disposable local rehearsal database');
-}
+DatabaseTargetGuard::assertApproved($name);
 $db = Connection::open();
 if ($db->query('SELECT DATABASE()')->fetchColumn() !== $name) {
     throw new RuntimeException('Connected database identity differs');

@@ -2,9 +2,11 @@
 declare(strict_types=1);
 
 use Anicraze\Config\Environment;
+use Anicraze\Config\DatabaseTargetGuard;
 use Anicraze\Database\Connection;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
+Environment::load(dirname(__DIR__));
 
 if (PHP_SAPI !== 'cli') {
     throw new RuntimeException('Migrations are CLI-only');
@@ -13,10 +15,7 @@ if (Environment::optional('ALLOW_SCHEMA_MIGRATION') !== '1') {
     throw new RuntimeException('Explicit ALLOW_SCHEMA_MIGRATION=1 is required');
 }
 $name = Environment::required('DB_NAME');
-if (in_array($name, ['anicraze_demo', 'neondb', 'mysql', 'information_schema'], true)
-    || Environment::required('ANICRAZE_CONFIRM_DATABASE') !== $name) {
-    throw new RuntimeException('Target database identity/confirmation is invalid');
-}
+DatabaseTargetGuard::assertApproved($name);
 $database = Connection::open(true);
 if ($database->query('SELECT DATABASE()')->fetchColumn() !== $name) {
     throw new RuntimeException('Connected database identity differs');

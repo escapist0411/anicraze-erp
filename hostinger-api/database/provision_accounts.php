@@ -2,18 +2,18 @@
 declare(strict_types=1);
 
 use Anicraze\Config\Environment;
+use Anicraze\Config\DatabaseTargetGuard;
 use Anicraze\Database\Connection;
 use Anicraze\Database\Uuid;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
+Environment::load(dirname(__DIR__));
 
 if (PHP_SAPI !== 'cli' || Environment::optional('ALLOW_ACCOUNT_PROVISIONING') !== '1') {
     throw new RuntimeException('Account provisioning requires explicit CLI confirmation');
 }
 $name = Environment::required('DB_NAME');
-if (!str_starts_with($name, 'anicraze_phase5b_') || Environment::required('ANICRAZE_CONFIRM_DATABASE') !== $name) {
-    throw new RuntimeException('Account provisioning is restricted to disposable local rehearsal databases');
-}
+DatabaseTargetGuard::assertApproved($name);
 $db = Connection::open();
 if ($db->query('SELECT DATABASE()')->fetchColumn() !== $name) {
     throw new RuntimeException('Connected database identity differs');
@@ -35,8 +35,8 @@ foreach ($accounts as [$email, , , , $variable]) {
     $statement = $db->prepare('SELECT id FROM users WHERE email=?');
     $statement->execute([$email]);
     if ($statement->fetchColumn() === false) {
-        $password = getenv($variable);
-        if (!is_string($password) || strlen($password) < 12 || strlen($password) > 128) {
+        $password = Environment::required($variable);
+        if (strlen($password) < 12 || strlen($password) > 128) {
             throw new RuntimeException("Missing valid password environment variable for new account: {$variable}");
         }
         $new[$email] = $password;
